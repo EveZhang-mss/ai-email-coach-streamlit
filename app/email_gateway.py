@@ -1,17 +1,17 @@
-
 import imaplib
 import smtplib
 import ssl
 import certifi
 import html
+import hashlib
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
 from email import message_from_bytes
-
+from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Student
+from app.models import Student, ProcessedEmail, EmailSyncState
 
 def decode_mime_text(value):
     """解码邮件头中的中文和其他 MIME 编码文本。"""
@@ -310,3 +310,307 @@ def read_recent_emails(limit=10):
         return False, (
             f"邮件正文读取错误：{type(exc).__name__}: {exc}"
         )
+
+def make_email_dedup_key(email_data):
+    """优先使用 Message-ID；缺失时生成稳定的备用标识。"""
+    message_id = (email_data.get("message_id") or "").strip()
+
+    if message_id and len(message_id) <= 500:
+        return message_id
+
+    raw_content = "\n".join([
+        (email_data.get("from") or "").strip().lower(),
+        (email_data.get("date") or "").strip(),
+        (email_data.get("subject") or "").strip(),
+        (email_data.get("body") or "").strip(),
+    ])
+
+    digest = hashlib.sha256(
+        raw_content.encode("utf-8")
+    ).hexdigest()
+
+    return f"<{digest}@email-coach.local>"
+
+
+def save_received_emails(emails):
+    """保存邮件及 IMAP 定位信息，跳过重复邮件。"""
+    inserted = 0
+    duplicates = 0
+    skipped = 0
+
+    for email_data in emails:
+        sender_email = (
+            email_data.get("from") or ""
+        ).strip().lower()
+
+        if not sender_email:
+            skipped += 1
+            continue
+
+        mailbox = (
+            email_data.get("mailbox")
+            or settings.email_address
+        ).strip().lower()
+
+        uid_validity = email_data.get("uid_validity")
+        uid = email_data.get("uid")
+
+        dedup_key = make_email_dedup_key(email_data)
+
+        db = SessionLocal()
+
+        try:
+            # 第一层：检查邮件唯一标识
+            existing = (
+                db.query(ProcessedEmail)
+                .filter(
+                    ProcessedEmail.message_id == dedup_key
+                )
+                .first()
+            )
+
+            # 第二层：检查当前邮箱编号体系中的 UID
+            if existing is None and uid is not None:
+                existing = (
+                    db.query(ProcessedEmail)
+                    .filter(
+                        ProcessedEmail.mailbox == mailbox,
+                        ProcessedEmail.uid_validity == uid_validity,
+                        ProcessedEmail.uid == uid,
+                    )
+                    .first()
+                )
+
+            if existing:
+                duplicates += 1
+                continue
+
+            record = ProcessedEmail(
+                mailbox=mailbox,
+                uid_validity=uid_validity,
+                uid=uid,
+                message_id=dedup_key,
+                sender_email=sender_email,
+                subject=email_data.get("subject") or "",
+                body=email_data.get("body") or "",
+                status="received",
+            )
+
+            db.add(record)
+            db.commit()
+            inserted += 1
+
+        except IntegrityError:
+            db.rollback()
+            duplicates += 1
+
+        except Exception:
+            db.rollback()
+            raise
+
+        finally:
+            db.close()
+
+    return {
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "skipped": skipped,
+    }
+
+def get_imap_uid_info(mail):
+    """读取当前邮箱的 UIDVALIDITY 和最大 UID。"""
+    status, data = mail.response("UIDVALIDITY")
+
+    if status != "UIDVALIDITY" or not data:
+        raise RuntimeError("无法读取 IMAP UIDVALIDITY")
+
+    uid_validity = data[0].decode()
+
+    status, data = mail.uid("SEARCH", None, "ALL")
+    if status != "OK":
+        raise RuntimeError("无法读取邮箱 UID 列表")
+
+    uids = [
+        int(uid)
+        for uid in (data[0].split() if data and data[0] else [])
+    ]
+
+    return uid_validity, max(uids, default=0)
+
+
+def fetch_email_by_uid(mail, uid, uid_validity):
+    """通过 IMAP UID 获取单封邮件及其定位信息。"""
+    status, data = mail.uid(
+        "FETCH",
+        str(uid),
+        "(BODY.PEEK[])",
+    )
+
+    if status != "OK":
+        raise RuntimeError(f"读取 UID {uid} 失败")
+
+    for item in data:
+        if not isinstance(item, tuple):
+            continue
+
+        msg = message_from_bytes(item[1])
+
+        return {
+            "from": parseaddr(
+                decode_mime_text(msg.get("From", ""))
+            )[1],
+            "subject": decode_mime_text(
+                msg.get("Subject", "")
+            ),
+            "date": msg.get("Date", ""),
+            "message_id": msg.get("Message-ID", ""),
+            "body": decode_email_body(msg),
+            "mailbox": settings.email_address.strip().lower(),
+            "uid_validity": uid_validity,
+            "uid": int(uid),
+        }
+
+    raise RuntimeError(f"UID {uid} 没有返回邮件内容")
+
+
+def sync_new_emails():
+    """
+    增量同步教练邮箱。
+
+    首次运行：建立同步起点，不导入历史邮件。
+    后续运行：只读取新 UID。
+    邮件成功保存后才推进游标。
+    """
+    if not settings.email_enabled:
+        return {
+            "success": False,
+            "message": "邮箱功能尚未启用",
+        }
+
+    db = SessionLocal()
+
+    try:
+        mailbox = settings.email_address.strip().lower()
+
+        state = (
+            db.query(EmailSyncState)
+            .filter(EmailSyncState.mailbox == mailbox)
+            .first()
+        )
+
+        if state is None:
+            state = EmailSyncState(
+                mailbox=mailbox,
+                uid_validity="",
+                last_uid=0,
+                initialized=False,
+            )
+            db.add(state)
+            db.commit()
+
+        context = ssl.create_default_context(
+            cafile=certifi.where()
+        )
+
+        with imaplib.IMAP4_SSL(
+            settings.imap_host,
+            settings.imap_port,
+            ssl_context=context,
+            timeout=15,
+        ) as mail:
+            mail.login(
+                settings.email_address,
+                settings.email_auth_code,
+            )
+
+            status, _ = mail.select("INBOX", readonly=True)
+
+            if status != "OK":
+                raise RuntimeError("无法打开收件箱")
+
+            uid_validity, current_max_uid = get_imap_uid_info(mail)
+
+            # 首次初始化，或服务器重置 UID 编号体系
+            if (
+                not state.initialized
+                or state.uid_validity != uid_validity
+            ):
+                state.uid_validity = uid_validity
+                state.last_uid = current_max_uid
+                state.initialized = True
+                db.commit()
+
+                return {
+                    "success": True,
+                    "initialized": True,
+                    "message": "同步起点已建立，历史邮件不会导入",
+                    "last_uid": current_max_uid,
+                    "inserted": 0,
+                    "duplicates": 0,
+                }
+
+            status, data = mail.uid(
+                "SEARCH",
+                None,
+                "UID",
+                f"{state.last_uid + 1}:*",
+            )
+
+            if status != "OK":
+                raise RuntimeError("搜索新邮件失败")
+
+            found_uids = sorted({
+                int(uid)
+                for uid in (
+                    data[0].split()
+                    if data and data[0]
+                    else []
+                )
+                if int(uid) > state.last_uid
+            })
+
+            inserted = 0
+            duplicates = 0
+            skipped = 0
+
+            for uid in found_uids:
+                email_data = fetch_email_by_uid(
+                    mail,
+                    uid,
+                    uid_validity,
+                )
+
+                result = save_received_emails([email_data])
+
+                # 保存函数正常返回，表示该邮件已保存、
+                # 已确认重复，或已被明确跳过。
+                inserted += result["inserted"]
+                duplicates += result["duplicates"]
+                skipped += result["skipped"]
+
+                state.last_uid = uid
+                db.commit()
+
+            return {
+                "success": True,
+                "initialized": False,
+                "message": "增量收件完成",
+                "last_uid": state.last_uid,
+                "found": len(found_uids),
+                "inserted": inserted,
+                "duplicates": duplicates,
+                "skipped": skipped,
+            }
+
+    except Exception as exc:
+        db.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                f"邮件同步失败：{type(exc).__name__}: {exc}"
+            ),
+        }
+
+    finally:
+        db.close()

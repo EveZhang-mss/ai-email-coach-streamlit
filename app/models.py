@@ -53,13 +53,32 @@ class Submission(Base):
     created_at: Mapped[datetime]=mapped_column(DateTime,default=now_utc)
     task: Mapped["Task"]=relationship(back_populates="submissions")
 class ProcessedEmail(Base):
-    """记录收到的邮件及处理状态，防止重复处理。"""
+    """记录收到的邮件、邮箱来源及处理状态，防止重复处理。"""
 
     __tablename__ = "processed_emails"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    # 邮件唯一标识，用于去重
+    # 收件的教练邮箱账号
+    mailbox: Mapped[str] = mapped_column(
+        String(255),
+        default="",
+        index=True,
+    )
+
+    # 邮件在当前邮箱文件夹中的 IMAP 定位信息
+    uid_validity: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    uid: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
+    # 邮件唯一标识；缺失时由程序生成备用标识
     message_id: Mapped[str | None] = mapped_column(
         String(500),
         unique=True,
@@ -73,14 +92,17 @@ class ProcessedEmail(Base):
         index=True,
     )
 
-    # 邮件主题和正文
     subject: Mapped[str] = mapped_column(
         String(255),
         default="",
     )
-    body: Mapped[str] = mapped_column(Text, default="")
 
-    # 对应的训练记录；尚未匹配时允许为空
+    body: Mapped[str] = mapped_column(
+        Text,
+        default="",
+    )
+
+    # 尚未匹配训练时允许为空
     training_id: Mapped[int | None] = mapped_column(
         ForeignKey("trainings.id"),
         nullable=True,
@@ -95,10 +117,52 @@ class ProcessedEmail(Base):
         index=True,
     )
 
-    # 失败时记录原因
     error: Mapped[str] = mapped_column(
         Text,
         default="",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=now_utc,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=now_utc,
+        onupdate=now_utc,
+    )
+
+class EmailSyncState(Base):
+    """保存每个教练邮箱的 IMAP 同步进度。"""
+
+    __tablename__ = "email_sync_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # 每个教练邮箱独立维护一份同步状态
+    mailbox: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+    )
+
+    # 当前 INBOX 的 UID 编号体系版本
+    uid_validity: Mapped[str] = mapped_column(
+        String(100),
+        default="",
+    )
+
+    # 已经成功保存的最大 UID
+    last_uid: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+    )
+
+    # 是否完成首次初始化
+    initialized: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
