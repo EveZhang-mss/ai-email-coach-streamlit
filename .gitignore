@@ -1,0 +1,24 @@
+# Python 虚拟环境
+.venv/
+venv/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 环境变量和密钥
+.env*
+!.env.example
+
+# 本地数据库和备份
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# 系统文件
+.DS_Store
+
+# 编辑器配置
+.vscode/
