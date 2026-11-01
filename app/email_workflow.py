@@ -398,7 +398,7 @@ def process_received_emails(limit=50):
             feedback = _format_feedback(result)
             subject_out = f"作业反馈：{task.title}"
             if result.get("next_task_created") and next_task:
-                feedback += "\\n\\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
+                feedback += "\n\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
                 subject_out = f"[TASK-{next_task.id}] {next_task.title}"
             _queue_delivery(email_id, sender, subject_out, feedback)
             retry_pending_replies()
@@ -446,7 +446,7 @@ def recover_interrupted_emails(limit=50):
             body = _format_feedback(result)
             subject = f"作业反馈：{task.title}"
             if result.get("next_task_created") and next_task:
-                body += "\\n\\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
+                body += "\n\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
                 subject = f"[TASK-{next_task.id}] {next_task.title}"
             record.status = "reply_pending"
             record.error = "已恢复数据库中的评分结果，等待发送反馈。"
