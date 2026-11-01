@@ -202,8 +202,12 @@ Return ONLY JSON:
   "training_focus": "Short description of the next skill",
   "path_adjustment_required": false,
   "path_adjustment_reason": "",
-  "path_adjustment_summary": ""
+  "path_adjustment_summary": "",
+  "fallback_task": null
 }
+When path_adjustment_required=true, fallback_task MUST contain a complete task
+(title, prompt, rubric) that continues the previously agreed learning path if
+the learner rejects the proposed path change. When false, fallback_task must be null.
 The criteria above illustrate structure only; choose criteria appropriate to this learner.
 """
     data = _call_ai_json(
@@ -244,4 +248,5 @@ Create the next personalized task in the same broader learning journey.
         "path_adjustment_required": bool(data.get("path_adjustment_required", False)),
         "path_adjustment_reason": str(data.get("path_adjustment_reason", "")),
         "path_adjustment_summary": str(data.get("path_adjustment_summary", "")),
+        "fallback_task": data.get("fallback_task"),
     }
