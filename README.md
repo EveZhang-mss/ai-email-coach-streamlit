@@ -66,9 +66,19 @@ Do not delete, reset, or overwrite an existing learner database. Back up before 
 7. Learner email reply → task matching → assessment → persisted feedback → outbound reply is tested end to end before describing the email workflow as complete.
 8. Historical rubric snapshots and learner records remain intact.
 
+## Local automatic email polling
+
+For automatic inbound processing while developing locally, keep Streamlit running and start one separate worker in a second terminal:
+
+```bash
+python -m app.email_worker
+```
+
+The worker checks the coach mailbox every 60 seconds by default and processes inbound learner replies plus pending outbound deliveries. Set `EMAIL_POLL_INTERVAL_SECONDS` to change the interval (minimum 30 seconds). Stop it with Ctrl+C. Do not start multiple workers against the same mailbox/database. The computer must remain awake and connected to the internet; this is local polling, not a hosted always-on service.
+
 ## Phase 2
 
-Deploy an independent worker and managed database on an always-on host. Local Streamlit or a local worker cannot run while the computer is powered off.
+Deploy the worker and managed database on an always-on host. Local Streamlit or a local worker cannot run while the computer is powered off.
 
 ## Security
 
