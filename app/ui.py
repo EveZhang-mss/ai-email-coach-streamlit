@@ -5,6 +5,7 @@ import streamlit as st
 
 from app.ai_client import get_ai_provider
 from app.config import settings
+from app.email_workflow import sync_and_process_emails, retry_pending_replies
 from app.service import (
     add_student,
     check_overdue,
@@ -86,6 +87,23 @@ def main():
         st.divider()
         st.caption(f"AI 服务：{provider} · {'已配置' if configured else '未配置'}")
         st.caption(f"当前评分模式：{mode}")
+        if st.button("同步并处理新邮件", use_container_width=True):
+            try:
+                result = sync_and_process_emails()
+                sync_info = result.get("sync", {})
+                st.success(
+                    f"邮箱同步完成：新增 {sync_info.get('inserted', 0)} 封；"
+                    f"处理 {len(result.get('processed', []))} 封。"
+                )
+                st.json(result.get("processed", []))
+            except Exception as exc:
+                st.error(f"邮件处理失败：{type(exc).__name__}")
+        if st.button("重试待发送反馈", use_container_width=True):
+            try:
+                results = retry_pending_replies()
+                st.success(f"已处理 {len(results)} 条待发送邮件。")
+            except Exception as exc:
+                st.error(f"重试失败：{type(exc).__name__}")
         if st.button("检查逾期任务", use_container_width=True):
             created = check_overdue()
             st.success(f"生成 {len(created)} 条提醒记录。" if created else "没有新的逾期任务。")
