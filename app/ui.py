@@ -5,7 +5,7 @@ import streamlit as st
 
 from app.ai_client import get_ai_provider
 from app.config import settings
-from app.email_workflow import sync_and_process_emails, retry_pending_replies
+from app.email_workflow import sync_and_process_emails, retry_pending_replies, recover_interrupted_emails
 from app.db import get_session
 from app.models import ProcessedEmail, EmailDelivery
 from sqlalchemy import select, func
@@ -107,6 +107,14 @@ def main():
                 st.success(f"已处理 {len(results)} 条待发送邮件。")
             except Exception as exc:
                 st.error(f"重试失败：{type(exc).__name__}")
+        if st.button("恢复已评分但中断的邮件", use_container_width=True):
+            try:
+                result = recover_interrupted_emails()
+                st.success(f"恢复 {len(result.get('recovered', []))} 封已评分邮件。")
+                if result.get("recovered"):
+                    st.json(result["recovered"])
+            except Exception as exc:
+                st.error(f"恢复失败：{type(exc).__name__}")
         if st.button("检查逾期任务", use_container_width=True):
             created = check_overdue()
             st.success(f"生成 {len(created)} 条提醒记录。" if created else "没有新的逾期任务。")
