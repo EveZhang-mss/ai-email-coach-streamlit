@@ -51,77 +51,64 @@ def _latest_agreement(db, training_id):
     )
 
 
-def _create_agreement(db, training, reply):
+def _create_agreement(db, training, reply, proposal_type="initial_training"):
+    """Store a versioned proposal; never activate or create a Task here."""
     tasks = reply.get("tasks") or []
-
-    if not tasks:
-        raise ValueError("AI 尚未生成完整训练任务。")
-
+    if len(tasks) != 1:
+        raise ValueError("AI 必须为本次提议生成且只生成一项任务。")
     task_data = tasks[0]
-
     if not task_data.get("title") or not task_data.get("prompt"):
-        raise ValueError("训练协议缺少任务标题或任务内容。")
-
-    rubric = task_data.get("rubric", "{}")
+        raise ValueError("训练提议缺少任务标题或任务内容。")
+    rubric = task_data.get("rubric", {})
     if isinstance(rubric, str):
         rubric = json.loads(rubric)
-
-    criteria = rubric.get("criteria", [])
-    if not criteria:
-        raise ValueError("训练协议缺少动态评分标准。")
-
-    points = [int(x["points"]) for x in criteria]
-    if any(x <= 0 for x in points) or sum(points) != 100:
-        raise ValueError("评分维度权重必须为正数，且总分为 100。")
+    from app.ai_assessment import normalize_rubric
+    rubric = normalize_rubric(rubric, fallback_threshold=settings.pass_threshold)
 
     latest = _latest_agreement(db, training.id)
     version = latest.version + 1 if latest else 1
-
     if latest and latest.status == "pending":
         latest.status = "superseded"
 
     proposal = {
+        "proposal_type": proposal_type,
         "goal": reply.get("goal_summary", training.goal),
         "coach_summary": reply.get("reply", ""),
         "task": {
-            "title": task_data["title"],
-            "prompt": task_data["prompt"],
+            "title": str(task_data["title"]).strip(),
+            "prompt": str(task_data["prompt"]).strip(),
             "rubric": rubric,
         },
-        # 暂不擅自替学员决定截止和提醒时间。
         "schedule": task_data.get("schedule"),
     }
-
     agreement = TrainingAgreement(
         training_id=training.id,
         version=version,
         status="pending",
         proposal_json=json.dumps(proposal, ensure_ascii=False),
     )
-
     db.add(agreement)
-    training.status = "awaiting_confirmation"
+    # An active training remains active while a later task is only proposed.
+    if proposal_type == "initial_training":
+        training.status = "awaiting_confirmation"
     db.flush()
-
     return agreement
 
 
-def confirm_training_agreement(db, training):
+def confirm_training_agreement(db, training, expected_type="initial_training"):
+    """Idempotently activate only the latest pending proposal of the expected type."""
     agreement = _latest_agreement(db, training.id)
-
     if not agreement or agreement.status != "pending":
-        raise ValueError("当前没有等待确认的训练协议。")
-
+        raise ValueError("当前没有等待确认的提议。")
     proposal = json.loads(agreement.proposal_json)
-    task_data = proposal["task"]
+    proposal_type = proposal.get("proposal_type", "initial_training")
+    if proposal_type != expected_type:
+        raise ValueError("确认语句与当前等待确认的提议类型不匹配。")
 
-    # 只有学员确认当前最新版本，才创建任务。
+    task_data = proposal["task"]
     task = Task(
         training_id=training.id,
-        sequence_no=max(
-            [x.sequence_no for x in training.tasks],
-            default=0,
-        ) + 1,
+        sequence_no=max([x.sequence_no for x in training.tasks], default=0) + 1,
         title=task_data["title"],
         prompt=task_data["prompt"],
         rubric=json.dumps(task_data["rubric"], ensure_ascii=False),
@@ -129,110 +116,92 @@ def confirm_training_agreement(db, training):
         status="assigned",
     )
     db.add(task)
-
     agreement.status = "confirmed"
     agreement.confirmed_at = now_utc()
     training.status = "active"
     db.flush()
 
-    # 只有存在经过协商并确认的时间表，才建立提醒计划。
     schedule = proposal.get("schedule")
-    if schedule:
+    if isinstance(schedule, dict):
         timezone_name = schedule.get("timezone")
         reminders = schedule.get("reminders", [])
-
         if timezone_name and reminders:
             db.add(ReminderPlan(
                 task_id=task.id,
                 timezone=timezone_name,
-                schedule_json=json.dumps(
-                    reminders, ensure_ascii=False
-                ),
+                schedule_json=json.dumps(reminders, ensure_ascii=False),
                 active=True,
             ))
-
     return task
+
+
+def reject_pending_agreement(db, training):
+    agreement = _latest_agreement(db, training.id)
+    if not agreement or agreement.status != "pending":
+        raise ValueError("当前没有等待处理的提议。")
+    proposal = json.loads(agreement.proposal_json)
+    agreement.status = "rejected"
+    if proposal.get("proposal_type", "initial_training") == "initial_training":
+        training.status = "planning"
+    # A next-task rejection intentionally leaves the active training and old tasks intact.
+    db.flush()
+    return agreement
+
+
 def send_student_message(tid, message, mode):
     with get_session() as db:
         training = db.get(Training, tid)
-
         if not training:
             raise ValueError("找不到训练记录。")
+        command = message.strip()
 
-        # 必须是学员明确发送确认语句，不能由 AI 的 ready 字段代替。
-        if message.strip() == "确认开始训练":
-            task = confirm_training_agreement(db, training)
+        if command in {"确认开始训练", "确认下一任务"}:
+            expected = "initial_training" if command == "确认开始训练" else "next_task"
+            task = confirm_training_agreement(db, training, expected)
+            reply_text = f"提议已确认并生效。任务：{task.title}"
+            db.add(EmailMessage(training_id=tid, sender="学员", subject="提议确认", body=message))
+            db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="确认成功", body=reply_text))
+            db.commit()
+            return reply_text
 
-            reply_text = (
-                f"训练协议已确认，当前版本已生效。"
-                f"第一项任务：{task.title}"
-            )
-
-            db.add(EmailMessage(
-                training_id=tid,
-                sender="学员",
-                subject="训练协议确认",
-                body=message,
-            ))
-            db.add(EmailMessage(
-                training_id=tid,
-                sender="AI 教练",
-                subject="训练正式启动",
-                body=reply_text,
-            ))
+        if command in {"拒绝训练提议", "拒绝下一任务", "暂不接受"}:
+            agreement = reject_pending_agreement(db, training)
+            reply_text = "已记录你的决定。现有训练与已完成记录保持不变；你可以继续讨论目标或稍后再提出新方案。"
+            db.add(EmailMessage(training_id=tid, sender="学员", subject="提议处理", body=message))
+            db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="已记录决定", body=reply_text))
             db.commit()
             return reply_text
 
         history = [
-            {
-                "role": "user" if item.sender == "学员" else "assistant",
-                "content": item.body,
-            }
-            for item in sorted(
-                training.messages,
-                key=lambda item: item.created_at,
-            )
+            {"role": "user" if item.sender == "学员" else "assistant", "content": item.body}
+            for item in sorted(training.messages, key=lambda item: item.created_at)
         ]
-
-        db.add(EmailMessage(
-            training_id=tid,
-            sender="学员",
-            subject="训练沟通",
-            body=message,
-        ))
+        db.add(EmailMessage(training_id=tid, sender="学员", subject="训练沟通", body=message))
         db.flush()
-
         reply = coach_message(history, message, mode)
         reply_text = reply.get("reply", "我们继续讨论你的训练目标。")
-
-        db.add(EmailMessage(
-            training_id=tid,
-            sender="AI 教练",
-            subject="训练回复",
-            body=reply_text,
-        ))
-
+        db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="训练回复", body=reply_text))
         training.goal = reply.get("goal_summary") or training.goal
 
-        # AI 可以提出协议，但绝不自动启动训练。
         if reply.get("ready") and reply.get("tasks"):
-            agreement = _create_agreement(db, training, reply)
+            proposal_type = "initial_training" if training.status in {"planning", "awaiting_confirmation"} or not training.tasks else "next_task"
+            agreement = _create_agreement(db, training, reply, proposal_type)
+            confirm_command = "确认开始训练" if proposal_type == "initial_training" else "确认下一任务"
+            reject_command = "拒绝训练提议" if proposal_type == "initial_training" else "拒绝下一任务"
             reply_text += (
-                f"\n\n我已经整理好训练协议第 {agreement.version} 版。"
-                "\n请检查训练目标、任务内容、评分标准和时间安排。"
-                "\n如果你同意，请单独回复：确认开始训练"
+                f"\\n\\n训练提议第 {agreement.version} 版已准备好，请检查任务和动态评分标准。"
+                f"\\n同意请单独回复：{confirm_command}"
+                f"\\n暂不接受请回复：{reject_command}"
             )
-
-            # 将完整协议内容写入教练回复，方便 UI 查看。
             db.add(EmailMessage(
-                training_id=tid,
-                sender="AI 教练",
-                subject=f"训练协议第 {agreement.version} 版",
+                training_id=tid, sender="AI 教练",
+                subject=f"训练提议第 {agreement.version} 版",
                 body=agreement.proposal_json,
             ))
-
         db.commit()
         return reply_text
+
+
 def submit_answer(task_id, answer, mode):
     if not answer or not answer.strip():
         raise ValueError("请先填写作业答案。")
@@ -306,71 +275,50 @@ def submit_answer(task_id, answer, mode):
 
         if passed:
             tr = task.training
-            seq = max(
-                [x.sequence_no for x in tr.tasks],
-                default=task.sequence_no,
-            ) + 1
-
-            if mode == "真实 AI":
-                # 根据本次真实评估生成下一道个性化任务
-                try:
+            seq = max([x.sequence_no for x in tr.tasks], default=task.sequence_no) + 1
+            try:
+                if mode == "真实 AI":
                     next_task = generate_next_task(
                         previous_assignment=task.prompt,
                         previous_submission=answer,
                         assessment=evaluation,
-                        training_goal=task.training.goal,
+                        training_goal=tr.goal,
                     )
-
-                    task_record = Task(
-                        training_id=task.training_id,
-                        sequence_no=seq,
-                        title=next_task["title"],
-                        prompt=next_task["prompt"],
-                        rubric=next_task["rubric"],
-                        status="assigned",
-                        due_at=now_utc() + timedelta(days=7),
-                    )
-
-                    db.add(task_record)
-                    next_task_created = True
-                    next_task_title = next_task["title"]
+                    task_payload = {
+                        "title": next_task["title"],
+                        "prompt": next_task["prompt"],
+                        "rubric": next_task["rubric"],
+                    }
                     training_focus = next_task.get("training_focus", "")
-
-                except Exception as exc:
-                    # 出题失败不能影响已经成功的成绩和验收
-                    next_task_error = str(exc)
-
-            else:
-                # 模拟模式保留固定的下一题
-                rub = {
-                    "criteria": [
-                        {"name": "Clear action items", "points": 35},
-                        {"name": "Concise structure", "points": 25},
-                        {"name": "Professional tone", "points": 20},
-                        {"name": "Grammar and vocabulary", "points": 20},
-                    ],
-                    "pass_threshold": settings.pass_threshold,
-                }
-
-                db.add(
-                    Task(
-                        training_id=task.training_id,
-                        sequence_no=seq,
-                        title=f"Task {seq}: Write a concise follow-up email",
-                        prompt=(
-                            "Write a concise 80–120 word follow-up email "
-                            "to a client after a project meeting. "
-                            "Summarize two action items, assign an owner "
-                            "for each, and confirm the next check-in date."
+                else:
+                    task_payload = {
+                        "title": f"Task {seq}: Write a concise follow-up email",
+                        "prompt": (
+                            "Write a concise 80–120 word follow-up email to a client "
+                            "after a project meeting. Summarize two action items, "
+                            "assign an owner for each, and confirm the next check-in date."
                         ),
-                        rubric=json.dumps(rub),
-                        status="assigned",
-                        due_at=now_utc() + timedelta(days=7),
-                    )
-                )
-
-                next_task_created = True
-                next_task_title = f"Task {seq}: Write a concise follow-up email"
+                        "rubric": {
+                            "criteria": [
+                                {"name": "Action-item accuracy", "description": "Whether both actions and owners are explicit", "points": 40},
+                                {"name": "Concise organization", "description": "Whether the message is easy to scan", "points": 30},
+                                {"name": "Audience appropriateness", "description": "Whether the tone fits the client", "points": 30},
+                            ],
+                            "pass_threshold": settings.pass_threshold,
+                        },
+                    }
+                proposal = {
+                    "ready": True,
+                    "goal_summary": tr.goal,
+                    "reply": "上一项任务已通过。我根据本次表现准备了下一项训练建议，请先审核。",
+                    "tasks": [task_payload],
+                }
+                agreement = _create_agreement(db, tr, proposal, "next_task")
+                next_task_title = task_payload["title"]
+                next_task_created = False
+                next_task_error = None
+            except Exception as exc:
+                next_task_error = str(exc)
 
         db.commit()
 
@@ -380,7 +328,7 @@ def submit_answer(task_id, answer, mode):
             "evaluation": evaluation,
             "passed": passed,
             "threshold": settings.pass_threshold,
-            "next_task_created": next_task_created,
+            "next_task_created": next_task_created,\n            "next_task_proposed": bool(passed and next_task_title),
             "next_task_title": next_task_title,
             "next_task_error": next_task_error,
             "training_focus": training_focus,
