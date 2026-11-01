@@ -240,13 +240,36 @@ Create the next personalized task in the same broader learning journey.
         except json.JSONDecodeError as exc:
             raise ValueError("下一道任务的评分标准格式不正确。") from exc
     rubric = normalize_rubric(rubric, fallback_threshold=settings.pass_threshold)
+    adjustment_required = bool(data.get("path_adjustment_required", False))
+    fallback_task = data.get("fallback_task")
+    if adjustment_required:
+        if not isinstance(fallback_task, dict):
+            raise ValueError("AI 提出学习路径调整时，必须同时提供原路径备用任务。")
+        fallback_title = str(fallback_task.get("title", "")).strip()
+        fallback_prompt = str(fallback_task.get("prompt", "")).strip()
+        fallback_rubric = fallback_task.get("rubric")
+        if isinstance(fallback_rubric, str):
+            try:
+                fallback_rubric = json.loads(fallback_rubric)
+            except json.JSONDecodeError as exc:
+                raise ValueError("原路径备用任务的评分标准格式不正确。") from exc
+        fallback_rubric = normalize_rubric(
+            fallback_rubric, fallback_threshold=settings.pass_threshold
+        )
+        if not fallback_title or not fallback_prompt:
+            raise ValueError("原路径备用任务缺少标题或任务要求。")
+        fallback_task = {
+            "title": fallback_title,
+            "prompt": fallback_prompt,
+            "rubric": fallback_rubric,
+        }
     return {
         "title": title,
         "prompt": prompt,
         "rubric": json.dumps(rubric, ensure_ascii=False),
         "training_focus": str(data.get("training_focus", "")),
-        "path_adjustment_required": bool(data.get("path_adjustment_required", False)),
+        "path_adjustment_required": adjustment_required,
         "path_adjustment_reason": str(data.get("path_adjustment_reason", "")),
         "path_adjustment_summary": str(data.get("path_adjustment_summary", "")),
-        "fallback_task": data.get("fallback_task"),
+        "fallback_task": fallback_task,
     }
