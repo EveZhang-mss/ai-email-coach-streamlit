@@ -187,19 +187,18 @@ def send_student_message(tid, message, mode):
         db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="训练回复", body=reply_text))
         training.goal = reply.get("goal_summary") or training.goal
 
-        if reply.get("ready") and reply.get("tasks"):
-            proposal_type = "initial_training" if training.status in {"planning", "awaiting_confirmation"} or not training.tasks else "next_task"
-            agreement = _create_agreement(db, training, reply, proposal_type)
-            confirm_command = "确认开始训练" if proposal_type == "initial_training" else "确认调整学习路径"
-            reject_command = "拒绝训练提议" if proposal_type == "initial_training" else "拒绝调整学习路径"
+        # Only the initial learning path requires confirmation here.
+        # Subsequent routine tasks are created by submit_answer after assessment.
+        if reply.get("ready") and reply.get("tasks") and not training.tasks and training.status in {"planning", "awaiting_confirmation"}:
+            agreement = _create_agreement(db, training, reply, "initial_training")
             reply_text += (
-                f"\\n\\n训练提议第 {agreement.version} 版已准备好，请检查任务和动态评分标准。"
-                f"\\n同意请单独回复：{confirm_command}"
-                f"\\n暂不接受请回复：{reject_command}"
+                f"\\n\\n你的首轮学习路径提议第 {agreement.version} 版已准备好，请检查整体目标、第一项任务和动态评分标准。"
+                f"\\n确认启动请回复：确认开始训练"
+                f"\\n暂不接受请回复：拒绝训练提议"
             )
             db.add(EmailMessage(
                 training_id=tid, sender="AI 教练",
-                subject=f"训练提议第 {agreement.version} 版",
+                subject=f"首轮学习路径提议第 {agreement.version} 版",
                 body=agreement.proposal_json,
             ))
         db.commit()
@@ -275,7 +274,8 @@ def submit_answer(task_id, answer, mode):
         next_task_created = False
         next_task_error = None
         next_task_title = None
-        training_focus = None\n        path_adjustment_proposed = False
+        training_focus = None
+        path_adjustment_proposed = False
 
         if passed:
             tr = task.training
@@ -356,7 +356,9 @@ def submit_answer(task_id, answer, mode):
             "evaluation": evaluation,
             "passed": passed,
             "threshold": settings.pass_threshold,
-            "next_task_created": next_task_created,\n            "next_task_proposed": False,\n            "path_adjustment_proposed": path_adjustment_proposed,
+            "next_task_created": next_task_created,
+            "next_task_proposed": False,
+            "path_adjustment_proposed": path_adjustment_proposed,
             "next_task_title": next_task_title,
             "next_task_error": next_task_error,
             "training_focus": training_focus,
