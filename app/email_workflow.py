@@ -19,7 +19,7 @@ from app.db import get_session
 from app.email_gateway import sync_new_emails
 from app.models import (
     ProcessedEmail, EmailDelivery, Student, Training, Task,
-    TrainingAgreement,
+    TrainingAgreement, Submission,
 )
 from app.service import submit_answer, send_student_message
 
@@ -255,6 +255,45 @@ def _proposal_reply(db, training, response):
     return "\n".join(lines)
 
 
+def _recover_committed_submission(task_id, answer, training_id, sequence_no):
+    """Recover a committed score after a crash without invoking AI a second time."""
+    import json
+    with get_session() as db:
+        submission = db.scalar(
+            select(Submission).where(
+                Submission.task_id == task_id,
+                Submission.answer == answer,
+            ).order_by(Submission.id.desc())
+        )
+        if not submission:
+            return None
+        evaluation = None
+        try:
+            parsed = json.loads(submission.feedback or "")
+            if isinstance(parsed, dict):
+                evaluation = parsed
+        except (TypeError, ValueError):
+            pass
+        next_task = db.scalar(select(Task).where(
+            Task.training_id == training_id,
+            Task.sequence_no == sequence_no + 1,
+        ))
+        pending_agreement = db.scalar(select(TrainingAgreement).where(
+            TrainingAgreement.training_id == training_id,
+            TrainingAgreement.status == "pending",
+        ).order_by(TrainingAgreement.version.desc()))
+        return {
+            "score": submission.score or 0,
+            "passed": bool(submission.passed),
+            "threshold": settings.pass_threshold,
+            "feedback": submission.feedback or "",
+            "evaluation": evaluation,
+            "next_task_created": bool(next_task),
+            "path_adjustment_proposed": bool(pending_agreement),
+            "recovered": True,
+        }, next_task
+
+
 def process_received_emails(limit=50):
     outcomes = []
     with get_session() as db:
@@ -344,18 +383,23 @@ def process_received_emails(limit=50):
                 outcomes.append({"id": email_id, "status": "needs_student_action"})
                 continue
 
-            result = submit_answer(task.id, body, _assessment_mode())
-            feedback = _format_feedback(result)
-            subject_out = f"作业反馈：{task.title}"
-            if result.get("next_task_created"):
+            recovered = _recover_committed_submission(
+                task.id, body, training.id, task.sequence_no
+            )
+            if recovered:
+                result, next_task = recovered
+            else:
+                result = submit_answer(task.id, body, _assessment_mode())
                 with get_session() as db:
                     next_task = db.scalar(select(Task).where(
                         Task.training_id == training.id,
                         Task.sequence_no == task.sequence_no + 1,
                     ))
-                    if next_task:
-                        feedback += "\n\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
-                        subject_out = f"[TASK-{next_task.id}] {next_task.title}"
+            feedback = _format_feedback(result)
+            subject_out = f"作业反馈：{task.title}"
+            if result.get("next_task_created") and next_task:
+                feedback += "\\n\\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
+                subject_out = f"[TASK-{next_task.id}] {next_task.title}"
             _queue_delivery(email_id, sender, subject_out, feedback)
             retry_pending_replies()
             outcomes.append({"id": email_id, "status": "scored", "score": result["score"]})
