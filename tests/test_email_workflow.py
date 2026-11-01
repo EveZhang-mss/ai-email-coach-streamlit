@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.db import get_session
-from app.models import EmailDelivery, ProcessedEmail, Student, Training, Task
+from app.models import EmailDelivery, ProcessedEmail, Student, Training, Task, Submission
 import app.email_workflow as workflow
 
 
@@ -183,4 +183,39 @@ def test_process_valid_task_scores_once_and_emails_next_task(monkeypatch, isolat
     assert "[TASK-" in sent[0][0]
     assert "下一项任务" in sent[0][1]
     with get_session() as db:
+        assert db.get(ProcessedEmail, email_id).status == "replied"
+
+
+
+def test_recovery_uses_committed_submission_without_rescoring(monkeypatch, isolated_db):
+    with get_session() as db:
+        _, training, task, record = _seed_email(
+            db, subject="Re: [TASK-1] 作业", body="Already submitted answer"
+        )
+        task_id, training_id, email_id = task.id, training.id, record.id
+        db.add(Submission(
+            task_id=task_id, answer="Already submitted answer", score=91,
+            feedback=json.dumps({"score": 91, "passed": True, "summary": "Good"}),
+            passed=True,
+        ))
+        db.add(Task(
+            training_id=training_id, sequence_no=2, title="Next task",
+            prompt="Do the next task", rubric="{}", status="assigned",
+        ))
+        db.commit()
+
+    def must_not_score(*args):
+        raise AssertionError("Committed submission must not be scored again")
+
+    sent = []
+    monkeypatch.setattr(workflow, "submit_answer", must_not_score)
+    monkeypatch.setattr(workflow, "_send_email", lambda to, subject, body: sent.append((subject, body)))
+    result = workflow.process_received_emails()
+
+    assert result[0]["status"] == "scored"
+    assert len(sent) == 1
+    assert "[TASK-" in sent[0][0]
+    assert "Next task" in sent[0][1]
+    with get_session() as db:
+        assert db.query(Submission).filter_by(task_id=task_id).count() == 1
         assert db.get(ProcessedEmail, email_id).status == "replied"
