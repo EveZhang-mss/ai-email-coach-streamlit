@@ -271,7 +271,7 @@ def submit_answer(task_id, answer, mode):
         next_task_created = False
         next_task_error = None
         next_task_title = None
-        training_focus = None
+        training_focus = None\n        path_adjustment_proposed = False
 
         if passed:
             tr = task.training
@@ -290,6 +290,7 @@ def submit_answer(task_id, answer, mode):
                         "rubric": next_task["rubric"],
                     }
                     training_focus = next_task.get("training_focus", "")
+                    adjustment_required = next_task.get("path_adjustment_required", False)
                 else:
                     task_payload = {
                         "title": f"Task {seq}: Write a concise follow-up email",
@@ -307,16 +308,39 @@ def submit_answer(task_id, answer, mode):
                             "pass_threshold": settings.pass_threshold,
                         },
                     }
-                proposal = {
-                    "ready": True,
-                    "goal_summary": tr.goal,
-                    "reply": "上一项任务已通过。我根据本次表现准备了下一项训练建议，请先审核。",
-                    "tasks": [task_payload],
-                }
-                agreement = _create_agreement(db, tr, proposal, "next_task")
-                next_task_title = task_payload["title"]
-                next_task_created = False
-                next_task_error = None
+                    adjustment_required = False
+
+                if adjustment_required:
+                    proposal = {
+                        "proposal_type": "path_adjustment",
+                        "goal_summary": tr.goal,
+                        "reply": "根据近期表现，建议调整整体学习路径。",
+                        "tasks": [task_payload],
+                        "path_adjustment_reason": next_task.get("path_adjustment_reason", ""),
+                        "path_adjustment_summary": next_task.get("path_adjustment_summary", ""),
+                    }
+                    agreement = _create_agreement(db, tr, proposal, "path_adjustment")
+                    next_task_title = task_payload["title"]
+                    path_adjustment_proposed = True
+                else:
+                    # Normal progression: create and assign the next task immediately.
+                    rubric_data = task_payload["rubric"]
+                    if isinstance(rubric_data, str):
+                        rubric_data = json.loads(rubric_data)
+                    from app.ai_assessment import normalize_rubric
+                    rubric_data = normalize_rubric(rubric_data, fallback_threshold=settings.pass_threshold)
+                    db.add(Task(
+                        training_id=task.training_id,
+                        sequence_no=seq,
+                        title=task_payload["title"],
+                        prompt=task_payload["prompt"],
+                        rubric=json.dumps(rubric_data, ensure_ascii=False),
+                        status="assigned",
+                        due_at=None,
+                    ))
+                    next_task_created = True
+                    next_task_title = task_payload["title"]
+                    path_adjustment_proposed = False
             except Exception as exc:
                 next_task_error = str(exc)
 
@@ -328,7 +352,7 @@ def submit_answer(task_id, answer, mode):
             "evaluation": evaluation,
             "passed": passed,
             "threshold": settings.pass_threshold,
-            "next_task_created": next_task_created,\n            "next_task_proposed": bool(passed and next_task_title),
+            "next_task_created": next_task_created,\n            "next_task_proposed": False,\n            "path_adjustment_proposed": path_adjustment_proposed,
             "next_task_title": next_task_title,
             "next_task_error": next_task_error,
             "training_focus": training_focus,
