@@ -244,3 +244,42 @@ def test_admin_recovery_action_recovers_stuck_scored_email(monkeypatch, isolated
     with get_session() as db:
         assert db.query(Submission).filter_by(task_id=task_id).count() == 1
         assert db.get(ProcessedEmail, email_id).status == "replied"
+
+
+
+def test_duplicate_confirmation_command_does_not_create_second_task(monkeypatch, isolated_db):
+    from app.models import TrainingAgreement
+
+    with get_session() as db:
+        _, training, task, record = _seed_email(
+            db, subject="Re: 训练确认", body="确认开始训练"
+        )
+        training.status = "active"
+        proposal = {
+            "proposal_type": "initial_training",
+            "goal": "Writing",
+            "task": {"title": "Write an email", "prompt": "Write one.", "rubric": {}},
+        }
+        agreement = TrainingAgreement(
+            training_id=training.id, version=1, status="confirmed",
+            proposal_json=json.dumps(proposal, ensure_ascii=False),
+        )
+        db.add(agreement)
+        db.commit()
+        training_id, email_id = training.id, record.id
+
+    def must_not_reconfirm(*args):
+        raise AssertionError("Previously confirmed command must be idempotent")
+
+    sent = []
+    monkeypatch.setattr(workflow, "send_student_message", must_not_reconfirm)
+    monkeypatch.setattr(workflow, "_send_email", lambda to, subject, body: sent.append(body))
+    result = workflow.process_received_emails()
+
+    assert result[0]["status"] == "replied"
+    assert len(sent) == 1
+    assert "此前已确认" in sent[0]
+    assert "[TASK-" in sent[0]
+    with get_session() as db:
+        assert db.query(Task).filter_by(training_id=training_id).count() == 1
+        assert db.get(ProcessedEmail, email_id).status == "replied"
