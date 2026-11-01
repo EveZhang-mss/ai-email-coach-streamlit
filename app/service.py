@@ -341,6 +341,12 @@ def submit_answer(task_id, answer, mode):
                         "path_adjustment_summary": next_task.get("path_adjustment_summary", ""),
                     }
                     agreement = _create_agreement(db, tr, proposal, "path_adjustment")
+                    db.add(EmailMessage(
+                        training_id=tr.id,
+                        sender="AI 教练",
+                        subject=f"学习路径调整建议第 {agreement.version} 版",
+                        body=agreement.proposal_json,
+                    ))
                     next_task_title = task_payload["title"]
                     path_adjustment_proposed = True
                 else:
