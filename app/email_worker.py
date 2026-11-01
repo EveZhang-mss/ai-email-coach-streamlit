@@ -28,6 +28,25 @@ def _stop(_signum, _frame):
     _running = False
 
 
+def run_cycle(limit=50):
+    """Run one mailbox cycle; separated for deterministic tests and diagnostics."""
+    result = sync_and_process_emails(limit=limit)
+    sync = result.get("sync", {})
+    if not sync.get("success", False):
+        logger.error("Mailbox sync failed: %s", sync.get("error", "unknown error"))
+        return result
+    processed = result.get("processed", [])
+    deliveries = result.get("deliveries", [])
+    logger.info(
+        "Mailbox cycle complete: inserted=%s processed=%s sent=%s pending=%s",
+        sync.get("inserted", 0),
+        len(processed),
+        sum(1 for item in deliveries if item.get("status") == "sent"),
+        sum(1 for item in deliveries if item.get("status") != "sent"),
+    )
+    return result
+
+
 def main():
     if not settings.email_enabled:
         raise SystemExit("EMAIL_ENABLED must be true before starting the email worker.")
@@ -41,20 +60,7 @@ def main():
     while _running:
         started = time.monotonic()
         try:
-            result = sync_and_process_emails(limit=limit)
-            sync = result.get("sync", {})
-            if not sync.get("success", False):
-                logger.error("Mailbox sync failed: %s", sync.get("error", "unknown error"))
-            else:
-                processed = result.get("processed", [])
-                deliveries = result.get("deliveries", [])
-                logger.info(
-                    "Mailbox cycle complete: inserted=%s processed=%s sent=%s pending=%s",
-                    sync.get("inserted", 0),
-                    len(processed),
-                    sum(1 for item in deliveries if item.get("status") == "sent"),
-                    sum(1 for item in deliveries if item.get("status") != "sent"),
-                )
+            run_cycle(limit=limit)
         except Exception:
             # Do not log message bodies, credentials, or full settings.
             logger.exception("Mailbox cycle failed")
