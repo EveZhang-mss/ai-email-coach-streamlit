@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.db import get_session
-from app.models import EmailDelivery, ProcessedEmail, Student, Training, Task, Submission
+from app.models import EmailDelivery, ProcessedEmail, Student, Training, Task, Submission, EmailSubmissionLink
 import app.email_workflow as workflow
 
 
@@ -157,7 +157,7 @@ def test_process_valid_task_scores_once_and_emails_next_task(monkeypatch, isolat
 
     calls = []
     sent = []
-    def fake_submit(received_task_id, answer, mode):
+    def fake_submit(received_task_id, answer, mode, **kwargs):
         calls.append((received_task_id, answer, mode))
         with get_session() as db:
             next_task = Task(
@@ -198,6 +198,8 @@ def test_recovery_uses_committed_submission_without_rescoring(monkeypatch, isola
             feedback=json.dumps({"score": 91, "passed": True, "summary": "Good"}),
             passed=True,
         ))
+        db.flush()
+        db.add(EmailSubmissionLink(processed_email_id=email_id, submission_id=db.query(Submission).filter_by(task_id=task_id).one().id))
         db.add(Task(
             training_id=training_id, sequence_no=2, title="Next task",
             prompt="Do the next task", rubric="{}", status="assigned",
@@ -232,6 +234,8 @@ def test_admin_recovery_action_recovers_stuck_scored_email(monkeypatch, isolated
             task_id=task_id, answer="Saved learner answer", score=88,
             feedback="Previously saved feedback", passed=True,
         ))
+        db.flush()
+        db.add(EmailSubmissionLink(processed_email_id=email_id, submission_id=db.query(Submission).filter_by(task_id=task_id).one().id))
         db.commit()
 
     sent = []
