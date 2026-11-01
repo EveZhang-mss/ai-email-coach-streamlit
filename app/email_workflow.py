@@ -9,6 +9,7 @@ import json
 import re
 import ssl
 import smtplib
+import certifi
 from datetime import datetime
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -43,7 +44,7 @@ def _send_email(to_address, subject, body):
     message["To"] = to_address
     message["Subject"] = subject
     message.set_content(body)
-    context = ssl.create_default_context()
+    context = ssl.create_default_context(cafile=certifi.where())
     with smtplib.SMTP_SSL(
         settings.smtp_host, settings.smtp_port, context=context, timeout=20
     ) as server:
