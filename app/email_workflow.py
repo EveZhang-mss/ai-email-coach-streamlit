@@ -475,12 +475,18 @@ def recover_interrupted_emails(limit=50):
             record = db.get(ProcessedEmail, email_id)
             if not record:
                 continue
-            student, training, error = _match_student_and_training(db, record)
+            sender = (record.sender_email or "").strip().lower()
+            student = db.scalar(select(Student).where(
+                func.lower(func.trim(Student.email)) == sender
+            ))
             token = TASK_TOKEN.search(record.subject or "")
-            if not student or not training or not token:
+            if not student or not token:
                 continue
             task = db.get(Task, int(token.group(1)))
-            if not task or task.training_id != training.id:
+            if not task:
+                continue
+            training = db.get(Training, task.training_id)
+            if not training or training.student_id != student.id:
                 continue
             recovered = _recover_committed_submission(
                 task.id, (record.body or "").strip(), training.id, task.sequence_no, email_id
