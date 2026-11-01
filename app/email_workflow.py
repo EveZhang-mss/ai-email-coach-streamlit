@@ -336,7 +336,9 @@ def process_received_emails(limit=50):
                 continue
 
             if not body:
-                reply = _task_correction(db, training, "邮件正文为空，请填写作业内容后重新发送。")
+                with get_session() as db:
+                    fresh_training = db.get(Training, training.id)
+                    reply = _task_correction(db, fresh_training, "邮件正文为空，请填写作业内容后重新发送。")
                 _queue_delivery(email_id, sender, "作业内容为空，请补充后重发", reply)
                 retry_pending_replies()
                 outcomes.append({"id": email_id, "status": "needs_student_action"})
