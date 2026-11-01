@@ -82,3 +82,28 @@ def test_confirmation_type_must_match_pending_proposal(isolated_db):
         with pytest.raises(ValueError):
             confirm_training_agreement(db, training, "next_task")
         assert len(training.tasks) == 0
+
+
+def test_rejecting_path_adjustment_queues_fallback_on_original_path(isolated_db):
+    with get_session() as db:
+        training = _training(db, status="active")
+        db.add(Task(
+            training_id=training.id,
+            sequence_no=1,
+            title="Completed original-path task",
+            prompt="Original prompt",
+            rubric=json.dumps(_proposal()["tasks"][0]["rubric"]),
+            status="accepted",
+        ))
+        db.flush()
+        proposal = _proposal()
+        proposal["fallback_task"] = {
+            "title": "Continue original path",
+            "prompt": "Practice the next skill on the agreed path.",
+            "rubric": _proposal()["tasks"][0]["rubric"],
+        }
+        _create_agreement(db, training, proposal, "path_adjustment")
+        reject_pending_agreement(db, training)
+        assert training.status == "active"
+        assert len(training.tasks) == 2
+        assert training.tasks[-1].title == "Continue original path"
