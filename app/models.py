@@ -175,3 +175,69 @@ class EmailSyncState(Base):
         default=now_utc,
         onupdate=now_utc,
     )
+from sqlalchemy import UniqueConstraint
+
+
+class ReminderPlan(Base):
+    """保存学员确认过的任务提醒计划。"""
+    __tablename__ = "reminder_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id"), unique=True, index=True
+    )
+    timezone: Mapped[str] = mapped_column(String(80))
+    schedule_json: Mapped[str] = mapped_column(Text)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=now_utc
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class ReminderLog(Base):
+    """记录每个任务的提醒发送状态，防止重复发送。"""
+    __tablename__ = "reminder_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id", "reminder_key",
+            name="uq_task_reminder_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id"), index=True
+    )
+    reminder_key: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    error: Mapped[str] = mapped_column(Text, default="")
+class TrainingAgreement(Base):
+    """保存 AI 与学员协商的训练协议版本。"""
+    __tablename__ = "training_agreements"
+    __table_args__ = (
+        UniqueConstraint(
+            "training_id", "version",
+            name="uq_training_agreement_version"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    training_id: Mapped[int] = mapped_column(
+        ForeignKey("trainings.id"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(
+        String(30), default="pending"
+    )
+    proposal_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=now_utc
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
