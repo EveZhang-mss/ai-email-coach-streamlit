@@ -178,20 +178,16 @@ def main():
                                             '请根据反馈修改。'
                                         )
 
-                                    elif r.get("next_task_proposed"):
-                                        st.success(
-                                            f'评分：{r["score"]}/100，通过验收！'
-                                            f'AI 已提出下一项训练：{r["next_task_title"]}'
-                                        )
-                                        st.info("请先到邮件工作台审核提议；同意后回复「确认下一任务」，暂不接受可回复「拒绝下一任务」。")
-                                        if r.get("training_focus"):
-                                            st.caption(f'下一阶段训练重点：{r["training_focus"]}')
+                                    elif r.get("path_adjustment_proposed"):
+                                        st.warning("AI 判断整体学习路径可能需要调整，已生成待确认方案。请到邮件工作台查看并回复「确认调整学习路径」或「拒绝调整学习路径」。")
 
-                                    elif r["next_task_created"]:
+                                    elif r.get("next_task_created"):
                                         st.success(
                                             f'评分：{r["score"]}/100，通过验收！'
-                                            f'已布置下一题：{r["next_task_title"]}'
+                                            f'已自动布置下一项任务：{r["next_task_title"]}'
                                         )
+                                        if r.get("training_focus"):
+                                            st.info(f'下一阶段训练重点：{r["training_focus"]}')
 
                                     else:
                                         st.success(
