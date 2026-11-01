@@ -150,8 +150,7 @@ def reject_pending_agreement(db, training):
         # Continue the previously agreed path using its prepared fallback task.
         fallback = proposal.get("fallback_task")
         if fallback:
-            db.add(Task(
-                training_id=training.id,
+            training.tasks.append(Task(
                 sequence_no=max([x.sequence_no for x in training.tasks], default=0) + 1,
                 title=fallback["title"],
                 prompt=fallback["prompt"],
