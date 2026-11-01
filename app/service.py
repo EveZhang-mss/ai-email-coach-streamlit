@@ -124,6 +124,8 @@ def confirm_training_agreement(db, training, expected_type="initial_training"):
     agreement.status = "confirmed"
     agreement.confirmed_at = now_utc()
     training.status = "active"
+    if proposal_type == "initial_training":
+        training.goal = proposal.get("goal", training.goal)
     db.flush()
 
     schedule = proposal.get("schedule")
@@ -200,7 +202,9 @@ def send_student_message(tid, message, mode):
         reply = coach_message(history, message, mode)
         reply_text = reply.get("reply", "我们继续讨论你的训练目标。")
         db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="训练回复", body=reply_text))
-        training.goal = reply.get("goal_summary") or training.goal
+        # A proposed goal is not committed to the active training until the learner confirms.
+        if not (reply.get("ready") and reply.get("tasks") and not training.tasks and training.status in {"planning", "awaiting_confirmation"}):
+            training.goal = reply.get("goal_summary") or training.goal
 
         # Only the initial learning path requires confirmation here.
         # Subsequent routine tasks are created by submit_answer after assessment.
