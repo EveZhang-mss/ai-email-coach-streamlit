@@ -415,6 +415,48 @@ def process_received_emails(limit=50):
     return outcomes
 
 
+def recover_interrupted_emails(limit=50):
+    """Recover stuck records only when a committed Submission proves scoring finished."""
+    outcomes = []
+    with get_session() as db:
+        ids = list(db.scalars(
+            select(ProcessedEmail.id).where(
+                ProcessedEmail.status.in_(["processing", "needs_review"])
+            ).order_by(ProcessedEmail.id).limit(limit)
+        ).all())
+    for email_id in ids:
+        with get_session() as db:
+            record = db.get(ProcessedEmail, email_id)
+            if not record:
+                continue
+            student, training, error = _match_student_and_training(db, record)
+            token = TASK_TOKEN.search(record.subject or "")
+            if not student or not training or not token:
+                continue
+            task = db.get(Task, int(token.group(1)))
+            if not task or task.training_id != training.id:
+                continue
+            recovered = _recover_committed_submission(
+                task.id, (record.body or "").strip(), training.id, task.sequence_no
+            )
+            if not recovered:
+                continue
+            result, next_task = recovered
+            recipient = record.sender_email
+            body = _format_feedback(result)
+            subject = f"作业反馈：{task.title}"
+            if result.get("next_task_created") and next_task:
+                body += "\\n\\n" + _task_mail(next_task, "上一项任务已通过，下一项任务已自动安排。")
+                subject = f"[TASK-{next_task.id}] {next_task.title}"
+            record.status = "reply_pending"
+            record.error = "已恢复数据库中的评分结果，等待发送反馈。"
+            db.commit()
+        _queue_delivery(email_id, recipient, subject, body)
+        outcomes.append({"id": email_id, "status": "recovered"})
+    deliveries = retry_pending_replies(limit=limit)
+    return {"recovered": outcomes, "deliveries": deliveries}
+
+
 def sync_and_process_emails(limit=50):
     sync_result = sync_new_emails()
     if not sync_result.get("success"):
