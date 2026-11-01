@@ -285,6 +285,9 @@ def _recover_committed_submission(task_id, answer, training_id, sequence_no, pro
                 evaluation = parsed
         except (TypeError, ValueError):
             pass
+        current_task = db.get(Task, task_id)
+        if not current_task:
+            return None
         next_task = db.scalar(select(Task).where(
             Task.training_id == training_id,
             Task.sequence_no == sequence_no + 1,
@@ -295,7 +298,7 @@ def _recover_committed_submission(task_id, answer, training_id, sequence_no, pro
         ).order_by(TrainingAgreement.version.desc()))
         # Do not mistake an older failed attempt with identical text for a
         # newly completed retry. Recovery needs evidence of committed success.
-        if task.status != "accepted" and not next_task and not pending_agreement:
+        if current_task.status != "accepted" and not next_task and not pending_agreement:
             return None
         return {
             "score": submission.score or 0,
