@@ -91,6 +91,8 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
     # An active training remains active while a later task is only proposed.
     if proposal_type == "initial_training":
         training.status = "awaiting_confirmation"
+    elif proposal_type == "path_adjustment":
+        training.status = "awaiting_path_adjustment"
     db.flush()
     return agreement
 
@@ -143,6 +145,8 @@ def reject_pending_agreement(db, training):
     agreement.status = "rejected"
     if proposal.get("proposal_type", "initial_training") == "initial_training":
         training.status = "planning"
+    elif proposal.get("proposal_type") == "path_adjustment":
+        training.status = "active"
     # A next-task rejection intentionally leaves the active training and old tasks intact.
     db.flush()
     return agreement
@@ -155,8 +159,8 @@ def send_student_message(tid, message, mode):
             raise ValueError("找不到训练记录。")
         command = message.strip()
 
-        if command in {"确认开始训练", "确认下一任务"}:
-            expected = "initial_training" if command == "确认开始训练" else "next_task"
+        if command in {"确认开始训练", "确认调整学习路径"}:
+            expected = "initial_training" if command == "确认开始训练" else "path_adjustment"
             task = confirm_training_agreement(db, training, expected)
             reply_text = f"提议已确认并生效。任务：{task.title}"
             db.add(EmailMessage(training_id=tid, sender="学员", subject="提议确认", body=message))
@@ -164,7 +168,7 @@ def send_student_message(tid, message, mode):
             db.commit()
             return reply_text
 
-        if command in {"拒绝训练提议", "拒绝下一任务", "暂不接受"}:
+        if command in {"拒绝训练提议", "拒绝调整学习路径", "暂不接受"}:
             agreement = reject_pending_agreement(db, training)
             reply_text = "已记录你的决定。现有训练与已完成记录保持不变；你可以继续讨论目标或稍后再提出新方案。"
             db.add(EmailMessage(training_id=tid, sender="学员", subject="提议处理", body=message))
@@ -186,8 +190,8 @@ def send_student_message(tid, message, mode):
         if reply.get("ready") and reply.get("tasks"):
             proposal_type = "initial_training" if training.status in {"planning", "awaiting_confirmation"} or not training.tasks else "next_task"
             agreement = _create_agreement(db, training, reply, proposal_type)
-            confirm_command = "确认开始训练" if proposal_type == "initial_training" else "确认下一任务"
-            reject_command = "拒绝训练提议" if proposal_type == "initial_training" else "拒绝下一任务"
+            confirm_command = "确认开始训练" if proposal_type == "initial_training" else "确认调整学习路径"
+            reject_command = "拒绝训练提议" if proposal_type == "initial_training" else "拒绝调整学习路径"
             reply_text += (
                 f"\\n\\n训练提议第 {agreement.version} 版已准备好，请检查任务和动态评分标准。"
                 f"\\n同意请单独回复：{confirm_command}"
