@@ -229,6 +229,7 @@ def test_admin_recovery_action_recovers_stuck_scored_email(monkeypatch, isolated
         _, training, task, record = _seed_email(
             db, subject="Re: [TASK-1] 作业", body="Saved learner answer", status="processing"
         )
+        task.status = "accepted"
         task_id, training_id, email_id = task.id, training.id, record.id
         db.add(Submission(
             task_id=task_id, answer="Saved learner answer", score=88,
