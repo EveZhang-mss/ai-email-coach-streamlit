@@ -257,3 +257,21 @@ class EmailDelivery(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+
+class EmailSubmissionLink(Base):
+    """Atomically links one inbound email to the submission it created."""
+    __tablename__ = "email_submission_links"
+    __table_args__ = (
+        UniqueConstraint("processed_email_id", name="uq_email_submission_source"),
+        UniqueConstraint("submission_id", name="uq_email_submission_record"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    processed_email_id: Mapped[int] = mapped_column(
+        ForeignKey("processed_emails.id"), index=True
+    )
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("submissions.id"), unique=True, index=True
+    )
