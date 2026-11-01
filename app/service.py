@@ -143,6 +143,19 @@ def reject_pending_agreement(db, training):
         raise ValueError("当前没有等待处理的提议。")
     proposal = json.loads(agreement.proposal_json)
     agreement.status = "rejected"
+    if proposal.get("proposal_type") == "path_adjustment":
+        # Continue the previously agreed path using its prepared fallback task.
+        fallback = proposal.get("fallback_task")
+        if fallback:
+            db.add(Task(
+                training_id=training.id,
+                sequence_no=max([x.sequence_no for x in training.tasks], default=0) + 1,
+                title=fallback["title"],
+                prompt=fallback["prompt"],
+                rubric=json.dumps(fallback["rubric"], ensure_ascii=False),
+                due_at=None,
+                status="assigned",
+            ))
     if proposal.get("proposal_type", "initial_training") == "initial_training":
         training.status = "planning"
     elif proposal.get("proposal_type") == "path_adjustment":
@@ -320,6 +333,7 @@ def submit_answer(task_id, answer, mode):
                         "goal_summary": tr.goal,
                         "reply": "根据近期表现，建议调整整体学习路径。",
                         "tasks": [task_payload],
+                        "fallback_task": next_task.get("fallback_task"),
                         "path_adjustment_reason": next_task.get("path_adjustment_reason", ""),
                         "path_adjustment_summary": next_task.get("path_adjustment_summary", ""),
                     }
