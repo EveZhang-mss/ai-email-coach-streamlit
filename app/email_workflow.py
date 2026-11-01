@@ -20,7 +20,7 @@ from app.db import get_session
 from app.email_gateway import sync_new_emails
 from app.models import (
     ProcessedEmail, EmailDelivery, Student, Training, Task,
-    TrainingAgreement, Submission,
+    TrainingAgreement, Submission, EmailSubmissionLink,
 )
 from app.service import submit_answer, send_student_message
 
@@ -256,16 +256,26 @@ def _proposal_reply(db, training, response):
     return "\n".join(lines)
 
 
-def _recover_committed_submission(task_id, answer, training_id, sequence_no):
+def _recover_committed_submission(task_id, answer, training_id, sequence_no, processed_email_id=None):
     """Recover a committed score after a crash without invoking AI a second time."""
     import json
     with get_session() as db:
-        submission = db.scalar(
-            select(Submission).where(
-                Submission.task_id == task_id,
-                Submission.answer == answer,
-            ).order_by(Submission.id.desc())
-        )
+        submission = None
+        if processed_email_id is not None:
+            link = db.scalar(select(EmailSubmissionLink).where(
+                EmailSubmissionLink.processed_email_id == processed_email_id
+            ))
+            if link:
+                submission = db.get(Submission, link.submission_id)
+        else:
+            # Legacy fallback is deliberately conservative; new email scoring
+            # always uses the explicit association above.
+            submission = db.scalar(
+                select(Submission).where(
+                    Submission.task_id == task_id,
+                    Submission.answer == answer,
+                ).order_by(Submission.id.desc())
+            )
         if not submission:
             return None
         evaluation = None
@@ -417,12 +427,12 @@ def process_received_emails(limit=50):
                 continue
 
             recovered = _recover_committed_submission(
-                task.id, body, training.id, task.sequence_no
+                task.id, body, training.id, task.sequence_no, email_id
             )
             if recovered:
                 result, next_task = recovered
             else:
-                result = submit_answer(task.id, body, _assessment_mode())
+                result = submit_answer(task.id, body, _assessment_mode(), processed_email_id=email_id)
                 with get_session() as db:
                     next_task = db.scalar(select(Task).where(
                         Task.training_id == training.id,
@@ -470,7 +480,7 @@ def recover_interrupted_emails(limit=50):
             if not task or task.training_id != training.id:
                 continue
             recovered = _recover_committed_submission(
-                task.id, (record.body or "").strip(), training.id, task.sequence_no
+                task.id, (record.body or "").strip(), training.id, task.sequence_no, email_id
             )
             if not recovered:
                 continue
