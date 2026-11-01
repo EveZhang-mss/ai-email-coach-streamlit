@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from app.db import get_session, init_db
 from app.models import (
     Student, Training, EmailMessage, Task, Submission,
-    TrainingAgreement, ReminderPlan, now_utc
+    TrainingAgreement, ReminderPlan, EmailSubmissionLink, now_utc
 )
 from app.coach import coach_message, generate_next_task
 from app.config import settings
@@ -222,7 +222,7 @@ def send_student_message(tid, message, mode):
         return reply_text
 
 
-def submit_answer(task_id, answer, mode):
+def submit_answer(task_id, answer, mode, processed_email_id=None):
     if not answer or not answer.strip():
         raise ValueError("请先填写作业答案。")
 
@@ -276,15 +276,20 @@ def submit_answer(task_id, answer, mode):
             evaluation = None
 
         # 保存本次提交和评分
-        db.add(
-            Submission(
-                task_id=task_id,
-                answer=answer,
-                score=score,
-                feedback=feedback,
-                passed=passed,
-            )
+        submission = Submission(
+            task_id=task_id,
+            answer=answer,
+            score=score,
+            feedback=feedback,
+            passed=passed,
         )
+        db.add(submission)
+        db.flush()
+        if processed_email_id is not None:
+            db.add(EmailSubmissionLink(
+                processed_email_id=processed_email_id,
+                submission_id=submission.id,
+            ))
 
         task.status = "accepted" if passed else "revision_required"
 
