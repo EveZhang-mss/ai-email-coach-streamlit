@@ -219,3 +219,28 @@ def test_recovery_uses_committed_submission_without_rescoring(monkeypatch, isola
     with get_session() as db:
         assert db.query(Submission).filter_by(task_id=task_id).count() == 1
         assert db.get(ProcessedEmail, email_id).status == "replied"
+
+
+
+def test_admin_recovery_action_recovers_stuck_scored_email(monkeypatch, isolated_db):
+    with get_session() as db:
+        _, training, task, record = _seed_email(
+            db, subject="Re: [TASK-1] 作业", body="Saved learner answer", status="processing"
+        )
+        task_id, training_id, email_id = task.id, training.id, record.id
+        db.add(Submission(
+            task_id=task_id, answer="Saved learner answer", score=88,
+            feedback="Previously saved feedback", passed=True,
+        ))
+        db.commit()
+
+    sent = []
+    monkeypatch.setattr(workflow, "_send_email", lambda to, subject, body: sent.append((subject, body)))
+    result = workflow.recover_interrupted_emails()
+
+    assert result["recovered"] == [{"id": email_id, "status": "recovered"}]
+    assert len(sent) == 1
+    assert "88/100" in sent[0][1]
+    with get_session() as db:
+        assert db.query(Submission).filter_by(task_id=task_id).count() == 1
+        assert db.get(ProcessedEmail, email_id).status == "replied"
