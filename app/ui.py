@@ -119,7 +119,7 @@ def main():
                 with st.chat_message("user" if m["sender"]=="学员" else "assistant"):
                     st.caption(f'{m["sender"]} · {m["subject"]}'); st.write(m["body"])
             with st.form("send_message",clear_on_submit=True):
-                message=st.text_area("模拟学员邮件",placeholder="例如：我希望提升公开演讲能力，常在课堂展示时紧张。也可以输入：确认开始训练 / 确认下一任务 / 拒绝下一任务。",height=120)
+                message=st.text_area("模拟学员邮件",placeholder="例如：我希望提升公开演讲能力，常在课堂展示时紧张。也可以输入：确认开始训练 / 确认调整学习路径 / 拒绝调整学习路径。",height=120)
                 if st.form_submit_button("发送邮件并获取教练回复"):
                     try:
                         if not message.strip():raise ValueError("请先输入邮件内容。")
