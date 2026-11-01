@@ -104,7 +104,25 @@ def main():
         if st.button("重试待发送反馈", use_container_width=True):
             try:
                 results = retry_pending_replies()
-                st.success(f"已处理 {len(results)} 条待发送邮件。")
+                sent = sum(1 for item in results if item.get("status") == "sent")
+                failed = [item for item in results if item.get("status") != "sent"]
+                if failed:
+                    st.error(f"成功发送 {sent} 封；仍有 {len(failed)} 封发送失败。")
+                    st.json(failed)
+                    with get_session() as db:
+                        failed_rows = db.execute(
+                            select(EmailDelivery.id, EmailDelivery.recipient,
+                                   EmailDelivery.error, EmailDelivery.processed_email_id)
+                            .where(EmailDelivery.status == "pending")
+                            .order_by(EmailDelivery.id)
+                        ).all()
+                    for row in failed_rows:
+                        st.error(
+                            f"投递 #{row.id}（邮件 #{row.processed_email_id}，"
+                            f"收件人 {row.recipient}）：{row.error or '暂无 SMTP 错误详情'}"
+                        )
+                else:
+                    st.success(f"成功发送 {sent} 封反馈邮件。"
             except Exception as exc:
                 st.error(f"重试失败：{type(exc).__name__}")
         if st.button("恢复已评分但中断的邮件", use_container_width=True):
