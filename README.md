@@ -1,40 +1,75 @@
-# AI 邮件教练 MVP（Streamlit + SQLite）
+# AI Personal Growth Coach MVP
 
-面向 1–10 名学员的本地演示项目：中文管理后台、模拟邮件工作台、多轮目标澄清、英文练习、模拟/真实 AI 评分、通过后自动布置下一题、逾期提醒和学习成果看板。
+Streamlit is the coach's **learning-record and progress dashboard**. The learner-facing daily workflow is intended to happen in the learner's own email client. Do not treat the Streamlit admin message panel as the production learner experience.
 
-> 这是演示版，不是生产邮件系统。邮件在网页中模拟，不会真的发送或接收。模拟评分只用于演示流程，不代表真实能力评估。
+## Current MVP scope
 
-## 安装与运行（Mac）
-在终端进入解压后的项目目录：
+- Learner profiles, training history, tasks, rubric snapshots, submissions and scores.
+- AI provider selection: DeepSeek by default; OpenAI is optional.
+- QQ IMAP mailbox synchronization primitives and duplicate-message protection.
+- Streamlit dashboard for progress and outcomes.
+
+**Important acceptance boundary:** mailbox synchronization is not, by itself, a complete email learning loop. Before calling the MVP email-first, verify that inbound learner replies are associated with the right learner and task, assessed exactly once, persisted, and answered by an outbound email. The admin dashboard is not a substitute for that flow.
+
+The independent always-on reminder worker and hosted database are Phase 2. On a local machine, any process stops when that machine is shut down.
+
+## Requirements
+
+- Python 3.11+
+- Git
+- A DeepSeek API key (or OpenAI API key if configured)
+- A dedicated test mailbox for controlled IMAP/SMTP acceptance
+
+## Fresh installation (macOS / Linux)
 
 ```bash
+git clone https://github.com/EveZhang-mss/ai-email-coach-streamlit.git
+cd ai-email-coach-streamlit
+git checkout feature/learner-confirmation-flow
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 cp .env.example .env
+```
+
+Edit `.env` locally. Never commit or share it. Set `AI_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` for the default provider. For QQ mail, enable IMAP/SMTP in mailbox settings and use its app authorization code, not the normal login password.
+
+Start the dashboard:
+
+```bash
 streamlit run app.py
 ```
 
-浏览器打开 http://localhost:8501 。无需安装 PostgreSQL。
+Open http://localhost:8501.
 
-## 首次演示
-- 首次启动会创建 `ai_email_coach.db` 并初始化两名示例学员和一条逾期任务。
-- 左侧选择「模拟 AI」，无需密钥。
-- 在「邮件工作台」选择训练，发送目标；第一轮会追问，下一轮可补充场景并生成任务。
-- 在「训练任务与验收」提交英文邮件。模拟分数基于篇幅和基本邮件格式，达到 `.env` 中 `PASS_THRESHOLD`（默认 80）后推进下一题。
-- 左侧「检查逾期任务」生成提醒记录；不会发送真实邮件。
+## Database portability and safety
 
-## 启用真实 AI
-在项目根目录 `.env` 设置：
+The default database is `ai_email_coach.db` in the project directory. It is local data and is not stored in GitHub. To continue existing learner records on another computer, stop the app, make a backup, and securely transfer the database file separately. Do not commit learner data to GitHub.
+
+For a clean acceptance test, use a separate test database path in `.env`, for example:
+
 ```dotenv
-OPENAI_API_KEY=你的API密钥
-OPENAI_MODEL=gpt-5.5
+DATABASE_URL=sqlite:///./acceptance_test.db
 ```
-保存后重启 Streamlit，左侧选择「真实 AI」。模型名需是你的 API 账号可用模型；API 调用可能产生费用。不要分享 `.env` 或将其提交到版本控制。
 
-## 常见问题
-- 找不到 streamlit：先激活 `.venv`，再运行 `python -m pip install -r requirements.txt`。
-- 8501 端口占用：`streamlit run app.py --server.port 8502`
-- 重置演示数据：停止应用后删除 `ai_email_coach.db`，重启会重新初始化。
-- 数据库默认使用 SQLite，不连接 PostgreSQL。
+Do not delete, reset, or overwrite an existing learner database. Back up before any schema or database operation.
+
+## Acceptance checklist
+
+1. Fresh clone installs without relying on the old computer's Python environment.
+2. Streamlit starts with the documented configuration.
+3. DeepSeek can conduct discovery and propose a learning path.
+4. The learner must explicitly confirm the initial path.
+5. A passing submission automatically creates the next ordinary task.
+6. A material path adjustment waits for learner confirmation; rejection preserves the agreed path.
+7. Learner email reply → task matching → assessment → persisted feedback → outbound reply is tested end to end before describing the email workflow as complete.
+8. Historical rubric snapshots and learner records remain intact.
+
+## Phase 2
+
+Deploy an independent worker and managed database on an always-on host. Local Streamlit or a local worker cannot run while the computer is powered off.
+
+## Security
+
+Never commit `.env`, API keys, mailbox authorization codes, learner emails, or the SQLite database.
