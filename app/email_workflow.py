@@ -158,7 +158,7 @@ def _queue_delivery(email_id, recipient, subject, body):
             subject=subject[:255], body=body, status="pending",
         )
         db.add(delivery)
-        db.flush()
+        db.commit()
         return delivery.id
 
 
