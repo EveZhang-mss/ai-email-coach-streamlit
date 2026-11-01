@@ -80,6 +80,9 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
             "rubric": rubric,
         },
         "schedule": task_data.get("schedule"),
+        "fallback_task": reply.get("fallback_task"),
+        "path_adjustment_reason": reply.get("path_adjustment_reason", ""),
+        "path_adjustment_summary": reply.get("path_adjustment_summary", ""),
     }
     agreement = TrainingAgreement(
         training_id=training.id,
