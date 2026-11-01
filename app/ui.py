@@ -6,6 +6,9 @@ import streamlit as st
 from app.ai_client import get_ai_provider
 from app.config import settings
 from app.email_workflow import sync_and_process_emails, retry_pending_replies
+from app.db import get_session
+from app.models import ProcessedEmail, EmailDelivery
+from sqlalchemy import select, func
 from app.service import (
     add_student,
     check_overdue,
@@ -107,6 +110,25 @@ def main():
         if st.button("检查逾期任务", use_container_width=True):
             created = check_overdue()
             st.success(f"生成 {len(created)} 条提醒记录。" if created else "没有新的逾期任务。")
+        with get_session() as db:
+            pending_delivery_count = db.scalar(
+                select(func.count(EmailDelivery.id)).where(EmailDelivery.status == "pending")
+            ) or 0
+            review_rows = db.execute(
+                select(ProcessedEmail.id, ProcessedEmail.sender_email,
+                       ProcessedEmail.subject, ProcessedEmail.status,
+                       ProcessedEmail.error)
+                .where(ProcessedEmail.status.in_(["needs_review", "processing", "reply_pending"]))
+                .order_by(ProcessedEmail.id.desc()).limit(30)
+            ).all()
+        st.caption(f"待发送反馈：{pending_delivery_count} 封")
+        if review_rows:
+            with st.expander(f"邮件异常记录（{len(review_rows)}）", expanded=False):
+                for row in review_rows:
+                    st.markdown(f"**邮件 #{row.id} · {row.status}**")
+                    st.caption(f"发件人：{row.sender_email}｜主题：{row.subject}")
+                    if row.error:
+                        st.write(row.error)
 
     if page == "学习总览":
         stats = get_overview()
