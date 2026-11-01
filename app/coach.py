@@ -179,6 +179,12 @@ Create exactly ONE next task in the learner's actual training domain.
 Use the learner's broader goal, previous task, actual submission and assessment.
 Target the most important demonstrated development opportunity, avoid repeating
 the previous task, and adjust difficulty gradually. Do not invent learner facts.
+Also assess whether the overall learning path itself needs a material change.
+Set path_adjustment_required=true ONLY when evidence shows the learner is progressing
+substantially faster/slower than the agreed path, the current path is unsuitable,
+or the original goal/context materially changed. Ordinary task-level difficulty
+adjustments are NOT path changes. Be conservative; normally return false.
+If true, explain the evidence and propose a concise path adjustment.
 Design a NEW task-specific rubric yourself: choose relevant criteria, descriptions,
 positive integer weights totaling 100, and a pass threshold from 0 to 100.
 Do not reuse fixed criteria or assume a business-email task.
@@ -193,7 +199,10 @@ Return ONLY JSON:
     ],
     "pass_threshold": 80
   },
-  "training_focus": "Short description of the next skill"
+  "training_focus": "Short description of the next skill",
+  "path_adjustment_required": false,
+  "path_adjustment_reason": "",
+  "path_adjustment_summary": ""
 }
 The criteria above illustrate structure only; choose criteria appropriate to this learner.
 """
@@ -232,4 +241,7 @@ Create the next personalized task in the same broader learning journey.
         "prompt": prompt,
         "rubric": json.dumps(rubric, ensure_ascii=False),
         "training_focus": str(data.get("training_focus", "")),
+        "path_adjustment_required": bool(data.get("path_adjustment_required", False)),
+        "path_adjustment_reason": str(data.get("path_adjustment_reason", "")),
+        "path_adjustment_summary": str(data.get("path_adjustment_summary", "")),
     }
