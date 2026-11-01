@@ -5,6 +5,7 @@ re-scores an email that has entered processing; uncertain crash recovery is
 left visible for review rather than risking duplicate submissions.
 """
 import os
+import json
 import re
 import ssl
 import smtplib
@@ -282,6 +283,10 @@ def _recover_committed_submission(task_id, answer, training_id, sequence_no):
             TrainingAgreement.training_id == training_id,
             TrainingAgreement.status == "pending",
         ).order_by(TrainingAgreement.version.desc()))
+        # Do not mistake an older failed attempt with identical text for a
+        # newly completed retry. Recovery needs evidence of committed success.
+        if task.status != "accepted" and not next_task and not pending_agreement:
+            return None
         return {
             "score": submission.score or 0,
             "passed": bool(submission.passed),
@@ -333,18 +338,46 @@ def process_received_emails(limit=50):
                     "planning", "awaiting_confirmation", "awaiting_path_adjustment"
                 }
             ):
-                response = send_student_message(training.id, body, _assessment_mode())
                 with get_session() as db:
-                    fresh_training = db.get(Training, training.id)
-                    if body in CONFIRM_COMMANDS:
+                    latest = db.scalar(select(TrainingAgreement).where(
+                        TrainingAgreement.training_id == training.id
+                    ).order_by(TrainingAgreement.version.desc()))
+                    latest_type = None
+                    if latest:
+                        latest_type = json.loads(latest.proposal_json).get("proposal_type", "initial_training")
+                    already_handled = bool(
+                        latest and (
+                            (body == "确认开始训练" and latest.status == "confirmed" and latest_type == "initial_training")
+                            or (body == "确认调整学习路径" and latest.status == "confirmed" and latest_type == "path_adjustment")
+                            or (body in REJECT_COMMANDS and latest.status == "rejected")
+                        )
+                    )
+                    if already_handled and body in CONFIRM_COMMANDS:
+                        task_data = json.loads(latest.proposal_json).get("task", {})
                         created = db.scalar(select(Task).where(
-                            Task.training_id == training.id
+                            Task.training_id == training.id,
+                            Task.title == task_data.get("title", ""),
                         ).order_by(Task.sequence_no.desc()))
-                        reply = response + ("\n\n" + _task_mail(created, "训练已确认，第一项任务如下。") if created else "")
-                    elif body not in REJECT_COMMANDS:
-                        reply = _proposal_reply(db, fresh_training, response)
-                    else:
+                        response = "该提议此前已确认，训练保持生效。"
+                        reply = response + ("\\n\\n" + _task_mail(created, "训练已确认，任务如下。") if created else "")
+                    elif already_handled:
+                        response = "该决定此前已记录，无需重复处理。"
                         reply = response
+                    else:
+                        response = None
+                if response is None:
+                    response = send_student_message(training.id, body, _assessment_mode())
+                    with get_session() as db:
+                        fresh_training = db.get(Training, training.id)
+                        if body in CONFIRM_COMMANDS:
+                            created = db.scalar(select(Task).where(
+                                Task.training_id == training.id
+                            ).order_by(Task.sequence_no.desc()))
+                            reply = response + ("\\n\\n" + _task_mail(created, "训练已确认，第一项任务如下。") if created else "")
+                        elif body not in REJECT_COMMANDS:
+                            reply = _proposal_reply(db, fresh_training, response)
+                        else:
+                            reply = response
                 _queue_delivery(email_id, sender, "AI 教练回复", reply)
                 retry_pending_replies()
                 outcomes.append({"id": email_id, "status": "replied"})
