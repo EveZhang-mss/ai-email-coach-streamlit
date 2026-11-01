@@ -178,17 +178,20 @@ def main():
                                             '请根据反馈修改。'
                                         )
 
+                                    elif r.get("next_task_proposed"):
+                                        st.success(
+                                            f'评分：{r["score"]}/100，通过验收！'
+                                            f'AI 已提出下一项训练：{r["next_task_title"]}'
+                                        )
+                                        st.info("请先到邮件工作台审核提议；同意后回复「确认下一任务」，暂不接受可回复「拒绝下一任务」。")
+                                        if r.get("training_focus"):
+                                            st.caption(f'下一阶段训练重点：{r["training_focus"]}')
+
                                     elif r["next_task_created"]:
                                         st.success(
                                             f'评分：{r["score"]}/100，通过验收！'
                                             f'已布置下一题：{r["next_task_title"]}'
                                         )
-
-                                        if r.get("training_focus"):
-                                            st.info(
-                                                f'下一阶段训练重点：'
-                                                f'{r["training_focus"]}'
-                                            )
 
                                     else:
                                         st.success(
