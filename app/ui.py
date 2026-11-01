@@ -24,24 +24,17 @@ def render_submission_feedback(feedback):
 
     st.markdown("#### 分项评分")
 
-    dimension_labels = {
-        "task_completion": "任务完成度",
-        "professional_tone": "专业语气",
-        "structure_clarity": "结构清晰度",
-        "grammar_vocabulary": "语法与词汇",
-    }
-
     dimensions = data.get("dimensions", {})
 
-    for key, label in dimension_labels.items():
-        item = dimensions.get(key, {})
+    for label, item in dimensions.items():
         score = int(item.get("score", 0))
-
-        st.markdown(f"**{label}：{score}/25**")
-        st.progress(max(0, min(25, score)) / 25)
-
+        maximum = max(1, int(item.get("max_points", 100)))
+        st.markdown(f"**{label}：{score}/{maximum}**")
+        st.progress(max(0, min(maximum, score)) / maximum)
         if item.get("comment"):
             st.caption(item["comment"])
+        if item.get("evidence"):
+            st.caption(f"依据：{item['evidence']}")
 
     st.markdown("#### 做得好的地方")
 
@@ -126,7 +119,7 @@ def main():
                 with st.chat_message("user" if m["sender"]=="学员" else "assistant"):
                     st.caption(f'{m["sender"]} · {m["subject"]}'); st.write(m["body"])
             with st.form("send_message",clear_on_submit=True):
-                message=st.text_area("模拟学员邮件",placeholder="例如：I want to improve my business emails.",height=120)
+                message=st.text_area("模拟学员邮件",placeholder="例如：我希望提升公开演讲能力，常在课堂展示时紧张。也可以输入：确认开始训练 / 确认下一任务 / 拒绝下一任务。",height=120)
                 if st.form_submit_button("发送邮件并获取教练回复"):
                     try:
                         if not message.strip():raise ValueError("请先输入邮件内容。")
