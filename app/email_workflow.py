@@ -231,6 +231,26 @@ def _match_student_and_training(db, record):
     return student, trainings[0], None
 
 
+def _looks_like_new_learning_goal(subject, body):
+    """Conservative Chinese/English signals for a new learning-domain request."""
+    text = f"{subject or ''}\n{body or ''}".lower()
+    signals = (
+        "想学习", "希望学习", "想学", "开始学习", "学习目标", "学习计划",
+        "巩固", "系统学习", "考研", "408", "计算机基础", "新的学习",
+        "learn ", "study ", "learning goal", "i want to learn", "i would like to learn",
+    )
+    return any(signal in text for signal in signals)
+
+
+def _create_learning_training(student_id):
+    """Create a separate planning record; never overwrite an existing learning path."""
+    with get_session() as db:
+        training = Training(student_id=student_id, goal="", status="planning")
+        db.add(training)
+        db.commit()
+        return training.id
+
+
 def _proposal_reply(db, training, response):
     pending = db.scalar(select(TrainingAgreement).where(
         TrainingAgreement.training_id == training.id,
@@ -336,17 +356,48 @@ def process_received_emails(limit=50):
             sender = record.sender_email
 
         try:
-            if not student or not training:
-                reply = (
-                    "你好，我无法将这封邮件匹配到唯一的学员训练档案。"
-                    f"原因：{match_error}\n请使用已登记的学员邮箱回复教练邮件。"
+            token = TASK_TOKEN.search(subject_in)
+
+            # A no-token message that clearly states a new learning goal starts
+            # a separate planning record. Existing training history is untouched.
+            if student and not token and _looks_like_new_learning_goal(subject_in, body):
+                training_id = _create_learning_training(student.id)
+                response = send_student_message(training_id, body, _assessment_mode())
+                with get_session() as db:
+                    fresh_training = db.get(Training, training_id)
+                    reply = _proposal_reply(db, fresh_training, response)
+                _queue_delivery(
+                    email_id, sender, "已收到新的学习目标｜AI 教练回复", reply
                 )
-                _queue_delivery(email_id, sender, "邮件暂无法匹配", reply)
+                retry_pending_replies()
+                outcomes.append({
+                    "id": email_id, "status": "new_learning_goal",
+                    "training_id": training_id,
+                })
+                continue
+
+            if not student:
+                reply = (
+                    "你好，我暂时无法匹配到你的学员档案。"
+                    f"原因：{match_error}\n请使用已登记的学员邮箱发送邮件，或联系教练添加档案。"
+                )
+                _queue_delivery(email_id, sender, "学员档案暂无法匹配", reply)
                 retry_pending_replies()
                 outcomes.append({"id": email_id, "status": "replied_match_help"})
                 continue
 
-            token = TASK_TOKEN.search(subject_in)
+            if not training:
+                reply = (
+                    "你好，我识别到你的学员档案，但目前有多个训练方向，"
+                    "这封邮件又没有任务编号。请在邮件中写明训练方向或任务标题，"
+                    "例如“计算机基础/考研408”或“英语邮件写作”。不需要填写任务编号。"
+                )
+                _queue_delivery(email_id, sender, "请确认本次邮件的学习方向", reply)
+                retry_pending_replies()
+                outcomes.append({"id": email_id, "status": "needs_clarification"})
+                continue
+
+            
             if body in CONFIRM_COMMANDS | REJECT_COMMANDS or (
                 not token and training.status in {
                     "planning", "awaiting_confirmation", "awaiting_path_adjustment"
@@ -399,14 +450,55 @@ def process_received_emails(limit=50):
 
             if not token:
                 with get_session() as db:
-                    fresh_training = db.get(Training, training.id)
-                    reply = _task_correction(db, fresh_training, "邮件主题中缺少任务编号 [TASK-数字]。")
-                _queue_delivery(email_id, sender, "请补充作业任务编号", reply)
+                    open_tasks = _open_tasks(db, training.id)
+                if len(open_tasks) == 1 and body:
+                    # A single outstanding task is an unambiguous implicit match.
+                    task = open_tasks[0]
+                elif len(open_tasks) > 1:
+                    titles = "、".join(task.title for task in open_tasks)
+                    reply = (
+                        "我收到了你的邮件。当前有多项未完成任务："
+                        f"{titles}。请在正文中提到对应任务标题或训练方向即可，"
+                        "无需填写 [TASK-数字]。"
+                    )
+                    _queue_delivery(email_id, sender, "请确认对应的学习任务", reply)
+                    retry_pending_replies()
+                    outcomes.append({"id": email_id, "status": "needs_clarification"})
+                    continue
+                else:
+                    reply = (
+                        "我收到了你的邮件，但当前训练没有待提交任务。"
+                        "如果你想开启新的学习方向，请直接描述学习目标、背景和期望；"
+                        "我会先与你沟通学习路径，待你确认后再创建任务。无需任务编号。"
+                    )
+                    _queue_delivery(email_id, sender, "继续说明你的学习目标", reply)
+                    retry_pending_replies()
+                    outcomes.append({"id": email_id, "status": "needs_clarification"})
+                    continue
+            else:
+                task_id = int(token.group(1))
+                with get_session() as db:
+                    task = db.get(Task, task_id)
+                    if not task or task.training_id != training.id or task.status not in {"assigned", "revision_required"}:
+                        task = None
+                if not task:
+                    reply = (
+                        "我没有找到对应的未完成任务。请直接在正文中写明训练方向或任务标题，"
+                        "不必填写任务编号；如果你要开始新的学习方向，也可以直接描述目标。"
+                    )
+                    _queue_delivery(email_id, sender, "请确认学习方向", reply)
+                    retry_pending_replies()
+                    outcomes.append({"id": email_id, "status": "needs_clarification"})
+                    continue
+
+            if not body:
+                reply = "我收到了邮件，但正文为空。请直接回复邮件补充作业内容或学习目标，无需填写任务编号。"
+                _queue_delivery(email_id, sender, "请补充邮件正文", reply)
                 retry_pending_replies()
                 outcomes.append({"id": email_id, "status": "needs_student_action"})
                 continue
 
-            task_id = int(token.group(1))
+            
             with get_session() as db:
                 task = db.get(Task, task_id)
                 if not task or task.training_id != training.id or task.status not in {"assigned", "revision_required"}:
