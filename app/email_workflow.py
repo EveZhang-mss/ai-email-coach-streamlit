@@ -496,6 +496,7 @@ def process_received_emails(limit=50):
                 if len(open_tasks) == 1 and body:
                     # A single outstanding task is an unambiguous implicit match.
                     task = open_tasks[0]
+                    task_id = task.id
                 elif len(open_tasks) > 1:
                     titles = "、".join(task.title for task in open_tasks)
                     reply = (
