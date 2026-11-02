@@ -385,7 +385,25 @@ def process_received_emails(limit=50):
             # A no-token message that clearly states a new learning goal starts
             # a separate planning record. Existing training history is untouched.
             if student and not token and _looks_like_new_learning_goal(subject_in, body):
-                training_id = _create_learning_training(student.id)
+                with get_session() as db:
+                    planning_trainings = list(db.scalars(
+                        select(Training).where(
+                            Training.student_id == student.id,
+                            Training.status.in_(["planning", "awaiting_confirmation"]),
+                        ).order_by(Training.id.desc())
+                    ).all())
+                if len(planning_trainings) == 1:
+                    training_id = planning_trainings[0].id
+                elif len(planning_trainings) > 1:
+                    _queue_delivery(
+                        email_id, sender, "请确认学习方向",
+                        "我发现你有多个尚未确认的学习计划。请在邮件中写明希望继续讨论的学习方向，例如“计算机基础/考研408”。无需填写任务编号。"
+                    )
+                    retry_pending_replies()
+                    outcomes.append({"id": email_id, "status": "needs_clarification"})
+                    continue
+                else:
+                    training_id = _create_learning_training(student.id)
                 response = send_student_message(training_id, body, _assessment_mode())
                 with get_session() as db:
                     fresh_training = db.get(Training, training_id)
