@@ -109,21 +109,28 @@ def test_wrong_task_id_returns_student_correctable_message(isolated_db):
 
 
 
-def test_process_missing_token_sends_correction_without_scoring(monkeypatch, isolated_db):
+def test_process_missing_token_infers_single_open_task(monkeypatch, isolated_db):
     with get_session() as db:
         _, _, task, record = _seed_email(db, subject="我的作业", body="Here is my answer")
         task_id, email_id = task.id, record.id
 
     sent = []
     scored = []
+    def fake_submit(received_task_id, answer, mode, **kwargs):
+        scored.append((received_task_id, answer))
+        return {
+            "score": 88, "passed": True, "threshold": 80,
+            "feedback": "Good work", "evaluation": None,
+            "next_task_created": False, "path_adjustment_proposed": False,
+        }
     monkeypatch.setattr(workflow, "_send_email", lambda to, subject, body: sent.append((to, subject, body)))
-    monkeypatch.setattr(workflow, "submit_answer", lambda *args: scored.append(args))
+    monkeypatch.setattr(workflow, "submit_answer", fake_submit)
     result = workflow.process_received_emails()
 
-    assert result[0]["status"] == "needs_student_action"
-    assert scored == []
+    assert result[0]["status"] == "scored"
+    assert scored == [(task_id, "Here is my answer")]
     assert len(sent) == 1
-    assert f"[TASK-{task_id}]" in sent[0][2]
+    assert "88/100" in sent[0][2]
     with get_session() as db:
         assert db.get(ProcessedEmail, email_id).status == "replied"
 
@@ -288,3 +295,60 @@ def test_duplicate_confirmation_command_does_not_create_second_task(monkeypatch,
     with get_session() as db:
         assert db.query(Task).filter_by(training_id=training_id).count() == 1
         assert db.get(ProcessedEmail, email_id).status == "replied"
+
+
+def test_unlabelled_new_learning_goal_creates_separate_planning_training(monkeypatch, isolated_db):
+    with get_session() as db:
+        student, old_training, _, record = _seed_email(
+            db, subject="学习新计算机基础知识",
+            body="我想巩固计算机系统基础，以考研408范围为目标。",
+        )
+        old_training.goal = "English email writing"
+        student_id, old_training_id, email_id = student.id, old_training.id, record.id
+
+    sent = []
+    def fake_message(training_id, body, mode):
+        assert "考研408" in body
+        return "我理解你的目标。我们先讨论学习路径和基础。"
+    monkeypatch.setattr(workflow, "send_student_message", fake_message)
+    monkeypatch.setattr(workflow, "_send_email", lambda to, subject, body: sent.append((subject, body)))
+    result = workflow.process_received_emails()
+
+    assert result[0]["status"] == "new_learning_goal"
+    assert len(sent) == 1
+    assert "学习路径" in sent[0][1]
+    with get_session() as db:
+        student_trainings = db.query(Training).filter_by(student_id=student_id).all()
+        assert len(student_trainings) == 2
+        assert db.get(Training, old_training_id).goal == "English email writing"
+        assert db.get(ProcessedEmail, email_id).status == "replied"
+
+
+def test_duplicate_unlabelled_mail_is_not_replied_twice(monkeypatch, isolated_db):
+    with get_session() as db:
+        student, training, task, first = _seed_email(
+            db, subject="我的作业", body="same content"
+        )
+        second = ProcessedEmail(
+            mailbox="coach@example.com", uid_validity="1", uid=2,
+            message_id="message-duplicate", sender_email=student.email,
+            subject=first.subject, body=first.body, status="received",
+        )
+        db.add(second)
+        db.commit()
+        first_id, second_id = first.id, second.id
+
+    sent = []
+    monkeypatch.setattr(workflow, "submit_answer", lambda *a, **k: {
+        "score": 88, "passed": True, "threshold": 80, "feedback": "Good",
+        "evaluation": None, "next_task_created": False,
+        "path_adjustment_proposed": False,
+    })
+    monkeypatch.setattr(workflow, "_send_email", lambda *a: sent.append(a))
+    results = workflow.process_received_emails()
+    assert len(sent) == 1
+    assert results[0]["status"] == "scored"
+    assert results[1]["status"] == "duplicate_ignored"
+    with get_session() as db:
+        assert db.get(ProcessedEmail, first_id).status == "replied"
+        assert db.get(ProcessedEmail, second_id).status == "duplicate_ignored"
