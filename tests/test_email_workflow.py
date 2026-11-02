@@ -148,7 +148,7 @@ def test_process_wrong_task_token_sends_correction_without_scoring(monkeypatch, 
     monkeypatch.setattr(workflow, "submit_answer", lambda *args: scored.append(args))
     result = workflow.process_received_emails()
 
-    assert result[0]["status"] == "needs_student_action"
+    assert result[0]["status"] == "needs_clarification"
     assert scored == []
     assert f"[TASK-{task_id}]" in sent[0]
     with get_session() as db:
@@ -304,6 +304,7 @@ def test_unlabelled_new_learning_goal_creates_separate_planning_training(monkeyp
             body="我想巩固计算机系统基础，以考研408范围为目标。",
         )
         old_training.goal = "English email writing"
+        db.commit()
         student_id, old_training_id, email_id = student.id, old_training.id, record.id
 
     sent = []
