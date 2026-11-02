@@ -122,7 +122,7 @@ def main():
                             f"收件人 {row.recipient}）：{row.error or '暂无 SMTP 错误详情'}"
                         )
                 else:
-                    st.success(f"成功发送 {sent} 封反馈邮件。"
+                    st.success(f"成功发送 {sent} 封反馈邮件。")
             except Exception as exc:
                 st.error(f"重试失败：{type(exc).__name__}")
         if st.button("恢复已评分但中断的邮件", use_container_width=True):
