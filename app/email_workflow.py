@@ -231,6 +231,21 @@ def _match_student_and_training(db, record):
     return student, trainings[0], None
 
 
+def _is_duplicate_inbound(db, record):
+    """Ignore an exact repeated message already handled for the same sender."""
+    if not record:
+        return False
+    previous = db.scalar(select(ProcessedEmail.id).where(
+        ProcessedEmail.id != record.id,
+        func.lower(func.trim(ProcessedEmail.sender_email)) ==
+            (record.sender_email or "").strip().lower(),
+        ProcessedEmail.subject == (record.subject or ""),
+        ProcessedEmail.body == (record.body or ""),
+        ProcessedEmail.status.in_(["replied", "reply_pending", "processed"]),
+    ).order_by(ProcessedEmail.id.desc()).limit(1))
+    return previous is not None
+
+
 def _looks_like_new_learning_goal(subject, body):
     """Conservative Chinese/English signals for a new learning-domain request."""
     text = f"{subject or ''}\n{body or ''}".lower()
@@ -354,6 +369,15 @@ def process_received_emails(limit=50):
             subject_in = record.subject or ""
             body = (record.body or "").strip()
             sender = record.sender_email
+            duplicate = _is_duplicate_inbound(db, record)
+            if duplicate:
+                record.status = "duplicate_ignored"
+                record.error = "与此前已处理邮件内容完全相同，已跳过重复回复。"
+                db.commit()
+
+        if duplicate:
+            outcomes.append({"id": email_id, "status": "duplicate_ignored"})
+            continue
 
         try:
             token = TASK_TOKEN.search(subject_in)
