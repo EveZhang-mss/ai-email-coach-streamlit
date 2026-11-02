@@ -525,10 +525,24 @@ def process_received_emails(limit=50):
                     if not task or task.training_id != training.id or task.status not in {"assigned", "revision_required"}:
                         task = None
                 if not task:
-                    reply = (
-                        "我没有找到对应的未完成任务。请直接在正文中写明训练方向或任务标题，"
-                        "不必填写任务编号；如果你要开始新的学习方向，也可以直接描述目标。"
-                    )
+                    with get_session() as db:
+                        open_tasks = _open_tasks(db, training.id)
+                    if open_tasks:
+                        choices = "\\n".join(
+                            f"- {item.title}：[TASK-{item.id}]"
+                            for item in open_tasks
+                        )
+                        reply = (
+                            "我没有匹配到你邮件中的任务编号。当前待完成任务如下：\\n"
+                            f"{choices}\\n"
+                            "你可以直接在正文写任务标题或学习方向，不必填写编号；"
+                            "如果仍无法判断，我会再向你确认。"
+                        )
+                    else:
+                        reply = (
+                            "我没有找到对应的未完成任务。请直接在正文中写明训练方向或任务标题，"
+                            "不必填写任务编号；如果你要开始新的学习方向，也可以直接描述目标。"
+                        )
                     _queue_delivery(email_id, sender, "请确认学习方向", reply)
                     retry_pending_replies()
                     outcomes.append({"id": email_id, "status": "needs_clarification"})
