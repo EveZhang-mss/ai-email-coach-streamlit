@@ -33,7 +33,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` locally. Never commit or share it. Set `AI_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` for the default provider. For QQ mail, enable IMAP/SMTP in mailbox settings and use its app authorization code, not the normal login password.
+Edit `.env` locally. Never commit or share it. Set `AI_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` for the default provider. Set `SEED_DEMO_DATA=false` to keep a new database empty for acceptance testing; the default `true` preserves the demo learner setup. For QQ mail, enable IMAP/SMTP in mailbox settings and use its app authorization code, not the normal login password.
 
 Start the dashboard:
 
