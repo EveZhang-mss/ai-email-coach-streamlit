@@ -12,7 +12,7 @@ from app.ai_assessment import assess_submission
 def initialize():
     init_db()
     with get_session() as db:
-        if (db.scalar(select(func.count(Student.id))) or 0)==0:
+        if settings.seed_demo_data and (db.scalar(select(func.count(Student.id))) or 0)==0:
             a=Student(name="Alex Chen",email="alex@example.com"); b=Student(name="Jamie Lee",email="jamie@example.com")
             db.add_all([a,b]); db.flush()
             t=Training(student_id=a.id,goal="Improve professional English emails",status="active")
