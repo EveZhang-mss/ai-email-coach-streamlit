@@ -131,7 +131,6 @@ def confirm_training_agreement(db, training, expected_type="initial_training"):
 
     task_data = proposal["task"]
     task = Task(
-        training_id=training.id,
         sequence_no=max([x.sequence_no for x in training.tasks], default=0) + 1,
         title=task_data["title"],
         prompt=task_data["prompt"],
@@ -139,7 +138,7 @@ def confirm_training_agreement(db, training, expected_type="initial_training"):
         due_at=None,
         status="assigned",
     )
-    db.add(task)
+    training.tasks.append(task)
     agreement.status = "confirmed"
     agreement.confirmed_at = now_utc()
     training.status = "active"
