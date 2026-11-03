@@ -128,3 +128,53 @@ def test_rejecting_path_adjustment_queues_fallback_on_original_path(isolated_db)
         assert training.status == "active"
         assert len(training.tasks) == 2
         assert training.tasks[-1].title == "Continue original path"
+
+
+def test_unchanged_pending_proposal_reuses_same_version(isolated_db):
+    with get_session() as db:
+        training = _training(db)
+        first = _create_agreement(db, training, _proposal(), "initial_training")
+        second = _create_agreement(db, training, _proposal(), "initial_training")
+        assert second.id == first.id
+        assert second.version == 1
+        assert second.status == "pending"
+
+
+def test_material_proposal_revision_supersedes_previous_version(isolated_db):
+    with get_session() as db:
+        training = _training(db)
+        first_proposal = _proposal()
+        first_proposal["learning_strategy"] = "Start with fundamentals"
+        first = _create_agreement(db, training, first_proposal, "initial_training")
+
+        revised_proposal = _proposal()
+        revised_proposal["learning_strategy"] = "Start with practical systems analysis"
+        revised_proposal["revision_summary"] = {
+            "changes": ["Reordered the learning strategy"],
+            "reason": "Learner requested more applied learning",
+        }
+        second = _create_agreement(db, training, revised_proposal, "initial_training")
+
+        assert second.id != first.id
+        assert second.version == 2
+        assert first.status == "superseded"
+        assert second.status == "pending"
+        saved = json.loads(second.proposal_json)
+        assert saved["revision_summary"]["reason"] == "Learner requested more applied learning"
+
+
+def test_confirm_only_latest_proposal_version(isolated_db):
+    with get_session() as db:
+        training = _training(db)
+        first_proposal = _proposal()
+        first_proposal["learning_strategy"] = "First approach"
+        first = _create_agreement(db, training, first_proposal, "initial_training")
+        revised_proposal = _proposal()
+        revised_proposal["learning_strategy"] = "Revised approach"
+        second = _create_agreement(db, training, revised_proposal, "initial_training")
+
+        task = confirm_training_agreement(db, training, "initial_training")
+        assert second.status == "confirmed"
+        assert first.status == "superseded"
+        assert task.sequence_no == 1
+        assert len(training.tasks) == 1
