@@ -88,3 +88,35 @@ def test_ready_coach_proposal_rejects_invalid_duration_range(monkeypatch):
     monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
     with pytest.raises(ValueError, match="时间范围不合理"):
         coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+
+
+def test_ready_coach_proposal_rejects_weights_not_totaling_100(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["assessment_plan"]["criteria"][0]["points"] = 90
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    with pytest.raises(ValueError, match="正整数权重"):
+        coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+
+
+def test_ready_coach_proposal_rejects_boolean_weight(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["assessment_plan"]["criteria"][0]["points"] = True
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    with pytest.raises(ValueError, match="正整数权重"):
+        coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+
+
+def test_ready_coach_proposal_rejects_missing_stage_activities(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["learning_path"][0].pop("activities")
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    with pytest.raises(ValueError, match="教学设计字段"):
+        coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+
+
+def test_ready_false_never_returns_formal_tasks(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["ready"] = False
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    result = coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+    assert result["tasks"] == []
