@@ -23,7 +23,7 @@ from app.models import (
     ProcessedEmail, EmailDelivery, Student, Training, Task,
     TrainingAgreement, Submission, EmailSubmissionLink,
 )
-from app.service import submit_answer, send_student_message
+from app.service import submit_answer, send_student_message, _format_proposal_for_history
 
 
 TASK_TOKEN = re.compile(r"\[TASK-(\d+)\]", re.IGNORECASE)
@@ -273,23 +273,14 @@ def _proposal_reply(db, training, response):
     ).order_by(TrainingAgreement.version.desc()))
     if not pending:
         return response
-    import json
     proposal = json.loads(pending.proposal_json)
-    task = proposal.get("task") or {}
-    lines = [response, "", f"提议版本：第 {pending.version} 版",
-             f"整体目标：{proposal.get('goal', training.goal)}",
-             f"第一项任务：{task.get('title', '')}",
-             f"任务要求：{task.get('prompt', '')}"]
-    if proposal.get("proposal_type") == "path_adjustment":
-        lines.extend([
-            "", f"调整原因：{proposal.get('path_adjustment_reason', '')}",
-            f"调整摘要：{proposal.get('path_adjustment_summary', '')}",
-            "", "确认请回复：确认调整学习路径",
-            "拒绝请回复：拒绝调整学习路径",
-        ])
-    else:
-        lines.extend(["", "确认启动请回复：确认开始训练", "暂不接受请回复：拒绝训练提议"])
-    return "\n".join(lines)
+    heading = (
+        "学习路径调整建议"
+        if proposal.get("proposal_type") == "path_adjustment"
+        else "首轮学习方案"
+    )
+    formatted = _format_proposal_for_history(proposal, pending.version)
+    return f"{response}\\n\\n{heading}\\n\\n{formatted}"
 
 
 def _recover_committed_submission(task_id, answer, training_id, sequence_no, processed_email_id=None):
