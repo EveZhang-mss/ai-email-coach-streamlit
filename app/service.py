@@ -158,7 +158,7 @@ def _format_proposal_for_history(proposal, version):
         "如果整体方向符合预期，请回复「确认开始训练」。",
         "如果暂时不接受，可以回复「拒绝训练提议」；我们会保留已有记录。",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _latest_agreement(db, training_id):
