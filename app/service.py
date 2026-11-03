@@ -74,8 +74,12 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
         "proposal_type": proposal_type,
         "goal": reply.get("goal_summary", training.goal),
         "coach_summary": reply.get("reply", ""),
+        "learning_strategy": reply.get("learning_strategy", ""),
         "learning_path": reply.get("learning_path", []),
         "assessment_plan": reply.get("assessment_plan", {}),
+        "remediation_policy": reply.get("remediation_policy", {}),
+        "assumptions": reply.get("assumptions", []),
+        "revision_summary": reply.get("revision_summary", {"changes": [], "reason": ""}),
         "task": {
             "title": str(task_data["title"]).strip(),
             "prompt": str(task_data["prompt"]).strip(),
