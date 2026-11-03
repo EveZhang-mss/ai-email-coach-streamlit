@@ -74,6 +74,8 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
         "proposal_type": proposal_type,
         "goal": reply.get("goal_summary", training.goal),
         "coach_summary": reply.get("reply", ""),
+        "learning_path": reply.get("learning_path", []),
+        "assessment_plan": reply.get("assessment_plan", {}),
         "task": {
             "title": str(task_data["title"]).strip(),
             "prompt": str(task_data["prompt"]).strip(),
@@ -209,9 +211,11 @@ def send_student_message(tid, message, mode):
         if reply.get("ready") and reply.get("tasks") and not training.tasks and training.status in {"planning", "awaiting_confirmation"}:
             agreement = _create_agreement(db, training, reply, "initial_training")
             reply_text += (
-                f"\\n\\n你的首轮学习路径提议第 {agreement.version} 版已准备好，请检查整体目标、第一项任务和动态评分标准。"
-                f"\\n确认启动请回复：确认开始训练"
-                f"\\n暂不接受请回复：拒绝训练提议"
+                f"\\n\\n我们整理出了一份学习方案草案（第 {agreement.version} 版），"
+                "包括整体学习路径、阶段目标、评分维度与标准，以及一项起始练习。"
+                "\\n请先一起检查和讨论，你可以提出修改意见。"
+                "\\n等你认可整体路径和评分体系后，再回复：确认开始训练"
+                "\\n如果暂时不接受，可以回复：拒绝训练提议"
             )
             db.add(EmailMessage(
                 training_id=tid, sender="AI 教练",
