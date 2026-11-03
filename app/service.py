@@ -66,9 +66,6 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
     rubric = normalize_rubric(rubric, fallback_threshold=settings.pass_threshold)
 
     latest = _latest_agreement(db, training.id)
-    version = latest.version + 1 if latest else 1
-    if latest and latest.status == "pending":
-        latest.status = "superseded"
 
     proposal = {
         "proposal_type": proposal_type,
@@ -90,6 +87,22 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
         "path_adjustment_reason": reply.get("path_adjustment_reason", ""),
         "path_adjustment_summary": reply.get("path_adjustment_summary", ""),
     }
+    # A clarification or regenerated but semantically unchanged draft must not
+    # create a new version. Compare the persisted proposal content, excluding
+    # conversational wording and the revision note itself.
+    if latest and latest.status == "pending":
+        previous = json.loads(latest.proposal_json)
+        comparable_keys = (
+            "proposal_type", "goal", "learning_strategy", "learning_path",
+            "assessment_plan", "remediation_policy", "assumptions", "task",
+            "schedule", "fallback_task", "path_adjustment_reason",
+            "path_adjustment_summary",
+        )
+        if all(previous.get(key) == proposal.get(key) for key in comparable_keys):
+            return latest
+        latest.status = "superseded"
+
+    version = latest.version + 1 if latest else 1
     agreement = TrainingAgreement(
         training_id=training.id,
         version=version,
