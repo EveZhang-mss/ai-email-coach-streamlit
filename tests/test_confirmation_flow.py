@@ -178,3 +178,59 @@ def test_confirm_only_latest_proposal_version(isolated_db):
         assert first.status == "superseded"
         assert task.sequence_no == 1
         assert len(training.tasks) == 1
+
+
+
+def test_proposal_history_renderer_formats_structured_content_for_learners():
+    from app.service import _format_proposal_for_history
+
+    proposal = {
+        "goal": "从零开始理解计算机系统",
+        "coach_summary": "先建立直观认识，再逐步动手实践。",
+        "learning_strategy": "每周安排约 3 小时，循序渐进。",
+        "learning_path": [{
+            "title": "认识计算机如何运行",
+            "objective": "理解程序如何被计算机执行",
+            "rationale": "先理解整体过程，再学习细节。",
+            "topics": ["程序和数据", "计算机执行指令的基本过程"],
+            "activities": ["生活化例子", "简单观察练习"],
+            "learning_outcomes": ["能用自己的话说明程序如何运行"],
+            "completion_evidence": ["完成一段自己的解释"],
+            "duration_range": {"min_weeks": 2, "max_weeks": 3, "estimated_hours": 9},
+        }],
+        "assessment_plan": {
+            "criteria": [{
+                "name": "概念理解", "description": "能准确解释核心概念",
+                "points": 100,
+                "performance_levels": {
+                    "beginning": "需要提示才能说明",
+                    "developing": "能说明部分概念",
+                    "proficient": "能独立清楚说明",
+                    "excellent": "能举例并迁移应用",
+                },
+                "evidence": ["书面解释"],
+            }],
+            "pass_threshold": 75,
+            "explanation": "结合任务证据判断理解程度。",
+            "stage_completion_rules": ["完成解释练习"],
+        },
+        "remediation_policy": {"principle": "针对实际困难补充练习"},
+        "assumptions": ["暂按每周 3 小时规划"],
+        "task": {
+            "title": "用自己的话解释程序",
+            "prompt": "请用一个生活中的例子解释程序如何执行。",
+            "rubric": {
+                "criteria": [{"name": "解释清楚", "points": 100, "description": "表达准确"}],
+                "pass_threshold": 75,
+            },
+        },
+    }
+
+    rendered = _format_proposal_for_history(proposal, 2)
+    assert "阶段 1：认识计算机如何运行" in rendered
+    assert "预计时间：2–3 周" in rendered
+    assert "概念理解（权重 100 分）" in rendered
+    assert "起步：" in rendered
+    assert "第一项练习" in rendered
+    assert "确认开始训练" in rendered
+    assert "\\n" not in rendered
