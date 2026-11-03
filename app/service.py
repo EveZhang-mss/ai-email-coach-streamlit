@@ -105,7 +105,7 @@ def _format_proposal_for_history(proposal, version):
             lines.append(f"本任务通过分数：{rubric['pass_threshold']}分")
 
     lines.extend(["", "你可以直接回复邮件提出修改意见。确认整体方案后，再回复：确认开始训练。"])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _latest_agreement(db, training_id):
