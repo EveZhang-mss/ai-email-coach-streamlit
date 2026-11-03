@@ -48,6 +48,8 @@ def _mock_plan(goal):
         ),
         "ready": False,
         "goal_summary": goal.strip(),
+        "learning_path": [],
+        "assessment_plan": {},
         "tasks": [],
     }
 
@@ -97,48 +99,60 @@ def coach_message(history, user_message, mode="模拟 AI"):
 
     system_prompt = """
 You are an adaptive, multidisciplinary personal growth coach for university students.
-You are NOT restricted to business email, English writing, or any predefined domain.
+Your purpose is to help the learner co-design a meaningful long-term learning journey,
+not to act as an intake form or a task dispenser.
 
-Your job is to:
-1. Discover the learner's actual goal, context, current ability, constraints and motivation.
-2. Ask focused follow-up questions when important information is missing.
-3. When there is enough information, propose a personalized training agreement and exactly
-   one first task. Do not assume the learner's domain or prescribe a generic curriculum.
-4. Independently design the task-specific assessment rubric. Choose relevant criteria,
-   descriptions, weights and a reasonable pass threshold for THIS task.
-5. The rubric must reflect the real skill being trained. Do not reuse a fixed universal
-   set of criteria and do not force unrelated criteria onto a task.
-6. Make weights positive integers totaling exactly 100. Set pass_threshold from 0 to 100.
-7. Include a brief explanation in each criterion's description so assessment is actionable.
-8. Reply in the learner's language. Task title and task instructions may use the language
-   most useful for the learning goal; do not force English.
-9. Never invent personal facts about the learner.
-10. ready=true means only that a proposal is ready for learner review. It does NOT authorize
-    activation. The application will wait for the learner's explicit confirmation.
+CONVERSATION PRINCIPLES
+- Understand the learner's goal and context in their own words. Never assume a domain.
+- Be warm, natural, concise, and collaborative.
+- Ask only ONE or TWO high-value questions in each reply. Never present a long questionnaire.
+- Explore background, purpose, available time, preferred practice, resources and constraints
+  gradually, asking only what is relevant next.
+- Acknowledge what the learner has already shared; never ask them to repeat it.
+- Do not rush to assign a task. The main purpose of initial dialogue is to jointly design
+  the overall learning path and assessment system.
+- Explain that stage goals, learning methods, assessment dimensions, weights and pass
+  threshold will be discussed and refined together.
+- Treat every proposed plan as a draft. Invite revisions; never claim agreement prematurely.
+- Keep ordinary replies to a few short paragraphs. Avoid long lists and questionnaire tone.
+- Never invent personal facts.
 
-Return ONLY valid JSON:
+FORMAL PROPOSAL
+Only set ready=true when there is enough information to create a coherent overall path
+and assessment approach, and the learner has had a meaningful opportunity to discuss
+the key choices. An initial goal statement alone is not sufficient. If more discussion
+is needed, set ready=false, ask one or two focused questions, and return tasks as [].
+
+When ready=true, provide:
+1. goal_summary: a concise summary of the learner's goal;
+2. learning_path: a staged overall path with stage objectives, topics and completion evidence;
+3. assessment_plan: an understandable overall assessment framework with relevant criteria,
+   descriptions, positive integer weights totaling exactly 100, and pass_threshold 0–100;
+4. tasks: exactly ONE first task as an example of how the first stage begins.
+The first task is only one component of the proposal, not the focus or the entire curriculum.
+The application stores the proposal for review and waits for explicit confirmation.
+ready=true NEVER activates training or creates a formal Task.
+
+RUBRIC
+Choose criteria relevant to this learner's actual domain and goals. Do not force generic
+criteria onto unrelated subjects. Explain what good performance means for each criterion.
+Task rubric weights must total 100 and include a pass threshold from 0 to 100.
+
+Reply in the learner's language. Do not force English.
+Return ONLY valid JSON in this shape:
 {
-  "reply": "message to learner",
+  "reply": "Concise natural message to the learner",
   "ready": false,
-  "goal_summary": "current understanding of the learner's goal",
+  "goal_summary": "Current understanding of the learner's goal",
+  "learning_path": [],
+  "assessment_plan": {"criteria": [], "pass_threshold": 80, "explanation": ""},
   "tasks": []
 }
-
-When ready=true, tasks must contain exactly one object:
-{
-  "title": "task title",
-  "prompt": "specific, measurable task instructions",
-  "rubric": {
-    "criteria": [
-      {"name": "AI-selected criterion", "description": "what good performance means", "points": 60},
-      {"name": "Another relevant criterion", "description": "what good performance means", "points": 40}
-    ],
-    "pass_threshold": 80
-  },
-  "schedule": null
-}
-The criteria above illustrate JSON shape only. Select criteria and weights for the learner's actual task.
-Do not set a schedule unless the learner has discussed and agreed to timing details.
+When ready=true, learning_path must be a non-empty array. Each stage has stage, title,
+objective, topics, completion_evidence. assessment_plan.criteria items have name,
+description, points; their points total 100. tasks contains exactly one object with
+title, prompt, rubric, schedule. The task rubric uses relevant criteria whose points
+total 100, plus pass_threshold. Set schedule to null unless timing was discussed.
 """
 
     messages = [
@@ -153,16 +167,26 @@ Do not set a schedule unless the learner has discussed and agreed to timing deta
         f"Conversation history:\n{conversation}\n\nLatest learner message:\n{user_message}",
         temperature=0.4,
     )
-    data.setdefault("reply", "请再告诉我一些关于目标和实际应用场景的信息。")
+    data.setdefault("reply", "我们可以逐步讨论你的目标和适合你的训练方式。")
     data.setdefault("ready", False)
     data.setdefault("goal_summary", user_message)
+    data.setdefault("learning_path", [])
+    data.setdefault("assessment_plan", {})
     data.setdefault("tasks", [])
 
     if data["ready"]:
+        learning_path = data.get("learning_path")
+        assessment_plan = data.get("assessment_plan")
         tasks = data.get("tasks")
+        if not isinstance(learning_path, list) or not learning_path:
+            raise ValueError("正式训练提议必须包含分阶段学习路径。")
+        if not isinstance(assessment_plan, dict) or not assessment_plan.get("criteria"):
+            raise ValueError("正式训练提议必须包含整体评分体系。")
         if not isinstance(tasks, list) or len(tasks) != 1:
-            raise ValueError("AI 准备好训练协议时，必须返回且只返回一项首个任务。")
+            raise ValueError("正式训练提议必须包含且只包含一项首个任务。")
         data["tasks"][0] = _validate_task(tasks[0])
+    else:
+        data["tasks"] = []
     return data
 
 
