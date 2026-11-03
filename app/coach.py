@@ -255,29 +255,64 @@ training or creates a formal Task.
                         "completion_evidence", "duration_range")
             if any(key not in stage for key in required):
                 raise ValueError(f"第 {index} 阶段缺少必要的教学设计字段。")
+            if (not isinstance(stage["stage"], int) or isinstance(stage["stage"], bool)
+                    or stage["stage"] < 1
+                    or any(not isinstance(stage[key], str) or not stage[key].strip()
+                           for key in ("title", "objective", "rationale"))
+                    or any(not isinstance(stage[key], list) for key in
+                           ("topics", "prerequisites", "activities",
+                            "learning_outcomes", "completion_evidence"))):
+                raise ValueError(f"第 {index} 阶段的字段类型或内容不正确。")
             duration = stage["duration_range"]
             if not isinstance(duration, dict):
                 raise ValueError(f"第 {index} 阶段的时间范围格式不正确。")
             minimum, maximum = duration.get("min_weeks"), duration.get("max_weeks")
             hours = duration.get("estimated_hours")
-            if (not isinstance(minimum, int) or not isinstance(maximum, int)
+            if (not isinstance(minimum, int) or isinstance(minimum, bool)
+                    or not isinstance(maximum, int) or isinstance(maximum, bool)
                     or minimum < 1 or maximum < minimum
-                    or not isinstance(hours, (int, float)) or hours <= 0):
+                    or not isinstance(hours, (int, float)) or isinstance(hours, bool)
+                    or hours <= 0):
                 raise ValueError(f"第 {index} 阶段的预计时间范围不合理。")
-        if not isinstance(assessment_plan, dict) or not assessment_plan.get("criteria"):
+        if not isinstance(assessment_plan, dict) or not isinstance(
+            assessment_plan.get("criteria"), list
+        ) or not assessment_plan["criteria"]:
             raise ValueError("正式训练提议必须包含整体评分体系。")
         criteria = assessment_plan["criteria"]
-        if sum(item.get("points", 0) for item in criteria if isinstance(item, dict)) != 100:
-            raise ValueError("整体评分体系各维度权重之和必须为 100。")
+        if any(not isinstance(item, dict) for item in criteria):
+            raise ValueError("整体评分维度格式不正确。")
+        weights = [item.get("points") for item in criteria]
+        if any(not isinstance(points, int) or isinstance(points, bool) or points <= 0
+               for points in weights) or sum(weights) != 100:
+            raise ValueError("整体评分体系各维度必须使用正整数权重，且合计 100。")
         for item in criteria:
+            if any(not isinstance(item.get(key), str) or not item[key].strip()
+                   for key in ("name", "description")):
+                raise ValueError("每个整体评分维度都必须包含名称和能力描述。")
             levels = item.get("performance_levels")
             if not isinstance(levels, dict) or any(
-                not str(levels.get(level, "")).strip()
+                not isinstance(levels.get(level), str) or not levels[level].strip()
                 for level in ("excellent", "proficient", "developing", "beginning")
             ):
                 raise ValueError("每个整体评分维度都必须包含四档具体表现描述。")
             if not isinstance(item.get("evidence"), list):
                 raise ValueError("每个整体评分维度都必须提供评价证据。")
+            minimum_score = item.get("minimum_score")
+            if minimum_score is not None and (
+                not isinstance(minimum_score, int) or isinstance(minimum_score, bool)
+                or not 0 <= minimum_score <= 100
+            ):
+                raise ValueError("评分维度 minimum_score 必须是 0–100 的整数或 null。")
+        threshold = assessment_plan.get("pass_threshold")
+        if not isinstance(threshold, int) or isinstance(threshold, bool) or not 0 <= threshold <= 100:
+            raise ValueError("整体评分通过标准必须是 0–100 的整数。")
+        for key in ("explanation",):
+            if not isinstance(assessment_plan.get(key), str) or not assessment_plan[key].strip():
+                raise ValueError("整体评分体系必须包含评分说明。")
+        if not isinstance(assessment_plan.get("stage_completion_rules"), list):
+            raise ValueError("stage_completion_rules 必须是数组。")
+        if not isinstance(assessment_plan.get("assessment_policy"), dict):
+            raise ValueError("assessment_policy 必须是对象。")
         if not isinstance(data.get("remediation_policy"), dict) or not data["remediation_policy"]:
             raise ValueError("正式训练提议必须包含自适应补强策略。")
         if not isinstance(data.get("assumptions"), list):
