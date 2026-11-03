@@ -241,3 +241,37 @@ class TrainingAgreement(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+
+
+class EmailDelivery(Base):
+    """持久化待发送邮件；发送失败只重试投递，不重新评分。"""
+    __tablename__ = "email_deliveries"
+    __table_args__ = (UniqueConstraint("processed_email_id", name="uq_email_delivery_source"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    processed_email_id: Mapped[int] = mapped_column(ForeignKey("processed_emails.id"), index=True)
+    recipient: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+
+class EmailSubmissionLink(Base):
+    """Atomically links one inbound email to the submission it created."""
+    __tablename__ = "email_submission_links"
+    __table_args__ = (
+        UniqueConstraint("processed_email_id", name="uq_email_submission_source"),
+        UniqueConstraint("submission_id", name="uq_email_submission_record"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    processed_email_id: Mapped[int] = mapped_column(
+        ForeignKey("processed_emails.id"), index=True
+    )
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("submissions.id"), unique=True, index=True
+    )
