@@ -43,7 +43,28 @@ def _proposal(proposal_type="initial_training"):
 def test_initial_proposal_waits_for_explicit_confirmation(isolated_db):
     with get_session() as db:
         training = _training(db)
-        _create_agreement(db, training, _proposal(), "initial_training")
+        proposal = _proposal()
+        proposal.update({
+            "learning_strategy": "Build foundations before applied analysis",
+            "learning_path": [{
+                "stage": 1, "title": "Foundations", "objective": "Explain core ideas",
+                "topics": ["core concepts"], "prerequisites": [],
+                "rationale": "Establish shared vocabulary",
+                "activities": ["guided practice"], "learning_outcomes": ["Explain concepts"],
+                "completion_evidence": ["short explanation"],
+                "duration_range": {"min_weeks": 2, "max_weeks": 3, "estimated_hours": 12}
+            }],
+            "assessment_plan": {"criteria": [], "pass_threshold": 80},
+            "remediation_policy": {"principle": "Target actual gaps"},
+            "assumptions": ["Six hours weekly"],
+            "revision_summary": {"changes": [], "reason": "Initial proposal"}
+        })
+        agreement = _create_agreement(db, training, proposal, "initial_training")
+        saved = json.loads(agreement.proposal_json)
+        assert saved["learning_strategy"] == "Build foundations before applied analysis"
+        assert saved["remediation_policy"]["principle"] == "Target actual gaps"
+        assert saved["assumptions"] == ["Six hours weekly"]
+        assert saved["revision_summary"]["reason"] == "Initial proposal"
         assert training.status == "awaiting_confirmation"
         assert len(training.tasks) == 0
         task = confirm_training_agreement(db, training, "initial_training")
