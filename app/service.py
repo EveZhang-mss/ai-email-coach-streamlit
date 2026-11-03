@@ -44,68 +44,121 @@ def get_training(tid):
         "tasks":[{"id":x.id,"sequence_no":x.sequence_no,"title":x.title,"prompt":x.prompt,"rubric":x.rubric,"status":x.status,"due_at":x.due_at,
         "submissions":[{"answer":z.answer,"score":z.score,"feedback":z.feedback,"passed":z.passed,"created_at":z.created_at} for z in sorted(x.submissions,key=lambda z:z.created_at)]} for x in sorted(t.tasks,key=lambda x:x.sequence_no)]}
 def _format_proposal_for_history(proposal, version):
-    """Render an internal proposal as readable learner-facing conversation text."""
+    """Render the structured proposal as clear, beginner-friendly learner-facing text."""
+    def readable(value):
+        if isinstance(value, list):
+            return "；".join(readable(item) for item in value)
+        if isinstance(value, dict):
+            return "；".join(
+                f"{key}：{readable(item)}" for key, item in value.items()
+            )
+        return str(value)
+
     lines = [
-        f"学习方案草案｜第 {version} 版",
+        f"学习方案草案（第 {version} 版）",
         "",
-        f"整体目标：{proposal.get('goal') or '待进一步明确'}",
+        "一、我们要达成的目标",
+        str(proposal.get("goal") or "根据目前沟通暂定，后续可以调整。"),
     ]
     summary = proposal.get("coach_summary")
     if summary:
-        lines.extend(["", "教练说明：", str(summary)])
+        lines.extend(["", "教练的建议", str(summary)])
 
     strategy = proposal.get("learning_strategy")
     if strategy:
-        lines.extend(["", "学习方式：", str(strategy)])
+        lines.extend(["", "二、整体学习方式", str(strategy)])
 
     stages = proposal.get("learning_path") or []
     if stages:
-        lines.extend(["", "学习路径"])
+        lines.extend(["", "三、分阶段学习路径"])
         for index, stage in enumerate(stages, 1):
             if not isinstance(stage, dict):
-                lines.append(f"{index}. {stage}")
+                lines.extend([f"阶段 {index}", readable(stage)])
                 continue
-            title = stage.get("title") or stage.get("name") or f"阶段 {index}"
-            lines.append(f"{index}. {title}")
-            for label, key in (("阶段目标", "objective"), ("时间范围", "time_range"),
-                               ("学习内容", "topics"), ("完成标准", "completion_evidence")):
+            duration = stage.get("duration_range") or {}
+            duration_text = ""
+            if isinstance(duration, dict):
+                low, high = duration.get("min_weeks"), duration.get("max_weeks")
+                hours = duration.get("estimated_hours")
+                if low is not None and high is not None:
+                    duration_text = f"{low}–{high} 周"
+                if hours is not None:
+                    duration_text += f"，预计总投入约 {hours} 小时"
+            lines.extend([
+                "",
+                f"阶段 {index}：{stage.get('title') or '学习阶段'}",
+            ])
+            if duration_text:
+                lines.append(f"预计时间：{duration_text}")
+            for key, label in (
+                ("objective", "这一阶段要解决的问题"),
+                ("rationale", "为什么先学这个"),
+                ("topics", "主要学习内容"),
+                ("activities", "我们会怎样练习"),
+                ("learning_outcomes", "完成后你将能够"),
+                ("completion_evidence", "怎样判断已经掌握"),
+            ):
                 value = stage.get(key)
                 if value:
-                    if isinstance(value, list):
-                        value = "；".join(str(item) for item in value)
-                    lines.append(f"   {label}：{value}")
+                    lines.append(f"{label}：{readable(value)}")
 
     assessment = proposal.get("assessment_plan") or {}
     if assessment:
-        lines.extend(["", "整体能力评价"])
-        for key, label in (("dimensions", "评价维度"), ("pass_threshold", "通过标准"),
-                           ("assessment_policy", "评价方式"), ("stage_completion_rules", "阶段完成规则")):
-            value = assessment.get(key)
-            if value:
-                if isinstance(value, (dict, list)):
-                    value = json.dumps(value, ensure_ascii=False, indent=2)
-                lines.append(f"{label}：{value}")
+        lines.extend(["", "四、长期能力评价"])
+        criteria = assessment.get("criteria") or assessment.get("dimensions") or []
+        for item in criteria:
+            if not isinstance(item, dict):
+                lines.append(readable(item))
+                continue
+            lines.append(f"- {item.get('name', '评价维度')}（权重 {item.get('points', '?')} 分）：{item.get('description', '')}")
+            levels = item.get("performance_levels") or {}
+            for level, label in (
+                ("beginning", "起步"), ("developing", "发展中"),
+                ("proficient", "熟练"), ("excellent", "优秀"),
+            ):
+                if levels.get(level):
+                    lines.append(f"  {label}：{levels[level]}")
+            if item.get("evidence"):
+                lines.append(f"  观察依据：{readable(item['evidence'])}")
+        if assessment.get("pass_threshold") is not None:
+            lines.append(f"整体通过参考线：{assessment['pass_threshold']} / 100")
+        if assessment.get("explanation"):
+            lines.append(f"评价说明：{assessment['explanation']}")
+        if assessment.get("stage_completion_rules"):
+            lines.append(f"阶段完成规则：{readable(assessment['stage_completion_rules'])}")
 
     remediation = proposal.get("remediation_policy")
     if remediation:
-        lines.extend(["", "补强机制：", json.dumps(remediation, ensure_ascii=False, indent=2)])
+        lines.extend(["", "五、发现困难时怎么办", readable(remediation)])
+
+    assumptions = proposal.get("assumptions") or []
+    if assumptions:
+        lines.extend(["", "六、目前暂定的假设（都可以讨论调整）"])
+        lines.extend(f"- {readable(item)}" for item in assumptions)
 
     task = proposal.get("task") or {}
     if task:
-        lines.extend(["", "第一项练习", f"任务：{task.get('title', '')}",
-                      f"任务要求：{task.get('prompt', '')}"])
+        lines.extend(["", "七、第一项练习", str(task.get("title") or "")])
+        if task.get("prompt"):
+            lines.append(str(task["prompt"]))
         rubric = task.get("rubric") or {}
-        criteria = rubric.get("criteria", []) if isinstance(rubric, dict) else []
-        if criteria:
-            lines.append("本任务评分标准：")
-            for item in criteria:
-                if isinstance(item, dict):
-                    lines.append(f"- {item.get('name', '评分项')}：{item.get('points', '')}分")
-        if isinstance(rubric, dict) and rubric.get("pass_threshold") is not None:
-            lines.append(f"本任务通过分数：{rubric['pass_threshold']}分")
+        if isinstance(rubric, dict):
+            criteria = rubric.get("criteria") or []
+            if criteria:
+                lines.append("这项练习的评分重点：")
+                for item in criteria:
+                    if isinstance(item, dict):
+                        lines.append(f"- {item.get('name', '评分项')}（{item.get('points', '?')} 分）：{item.get('description', '')}")
+            if rubric.get("pass_threshold") is not None:
+                lines.append(f"本次练习通过参考线：{rubric['pass_threshold']} / 100")
 
-    lines.extend(["", "你可以直接回复邮件提出修改意见。确认整体方案后，再回复：确认开始训练。"])
-    return "\n".join(lines)
+    lines.extend([
+        "",
+        "你可以直接用日常语言提出疑问或修改意见，不需要懂专业术语。",
+        "如果整体方向符合预期，请回复「确认开始训练」。",
+        "如果暂时不接受，可以回复「拒绝训练提议」；我们会保留已有记录。",
+    ])
+    return "\\n".join(lines)
 
 
 def _latest_agreement(db, training_id):
@@ -292,11 +345,11 @@ def send_student_message(tid, message, mode):
         if reply.get("ready") and reply.get("tasks") and not training.tasks and training.status in {"planning", "awaiting_confirmation"}:
             agreement = _create_agreement(db, training, reply, "initial_training")
             reply_text += (
-                f"\\n\\n我们整理出了一份学习方案草案（第 {agreement.version} 版），"
-                "包括整体学习路径、阶段目标、评分维度与标准，以及一项起始练习。"
-                "\\n请先一起检查和讨论，你可以提出修改意见。"
-                "\\n等你认可整体路径和评分体系后，再回复：确认开始训练"
-                "\\n如果暂时不接受，可以回复：拒绝训练提议"
+                f"\\n\\n我已经整理好一份完整的初步学习方案（第 {agreement.version} 版）。"
+                "\\n你不需要先决定技术工具，也不需要理解所有专业术语。"
+                "\\n请先看看整体方向是否符合你的兴趣和时间安排；任何地方都可以用自己的话提出疑问或修改意见。"
+                "\\n如果整体方向可以开始，请回复：确认开始训练"
+                "\\n如果暂时不接受，请回复：拒绝训练提议"
             )
             db.add(EmailMessage(
                 training_id=tid, sender="AI 教练",
