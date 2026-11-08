@@ -188,6 +188,157 @@ def _unwrap_nested_coach_payload(data):
     return result
 
 
+def _build_safe_initial_draft(history, user_message, conversation_state, partial=None):
+    """Last-resort provisional plan for an explicit request; never activate training."""
+    partial = partial if isinstance(partial, dict) else {}
+    state = conversation_state if isinstance(conversation_state, dict) else {}
+    messages = [
+        str(item.get("content", "")) for item in history
+        if isinstance(item, dict) and item.get("role") == "user"
+    ]
+    messages.append(str(user_message or ""))
+    combined = " ".join(messages)
+    goal = str(partial.get("goal_summary") or "").strip()
+    if not goal:
+        goal = next(
+            (item for item in messages if any(term in item for term in
+             ("想学", "想学习", "希望", "想培养", "目标是"))),
+            "提升自己在目标领域的理解与独立实践能力",
+        )
+    learner_profile = state.get("learner_profile", {})
+    level = learner_profile.get("level", "") if isinstance(learner_profile, dict) else ""
+    weekly_time = next(
+        (item for item in messages if any(term in item for term in
+         ("每周", "小时", "时间", "周末"))),
+        "每周投入时间暂按可调整安排处理",
+    )
+    path = partial.get("learning_path")
+    if not isinstance(path, list) or not path:
+        path = [
+            {
+                "stage": 1, "title": "建立基础认知",
+                "objective": f"围绕“{goal}”建立必要的核心概念和整体框架",
+                "topics": ["核心概念", "基本原理", "常见应用场景"],
+                "prerequisites": [], "rationale": "先建立整体理解，避免零散记忆。",
+                "activities": ["用自己的话解释核心概念", "完成简单的引导练习"],
+                "learning_outcomes": ["能解释关键概念及其用途"],
+                "completion_evidence": ["概念说明与基础练习"],
+                "duration_range": {"min_weeks": 2, "max_weeks": 3, "estimated_hours": 6},
+            },
+            {
+                "stage": 2, "title": "掌握核心方法",
+                "objective": "把基础知识用于解决典型问题",
+                "topics": ["常用方法", "问题拆解", "步骤与工具"],
+                "prerequisites": ["完成基础认知阶段"],
+                "rationale": "通过典型问题把知识转化为可操作的方法。",
+                "activities": ["跟随示例完成练习", "解释每一步的理由"],
+                "learning_outcomes": ["能独立完成基础类型的问题"],
+                "completion_evidence": ["典型练习及过程说明"],
+                "duration_range": {"min_weeks": 3, "max_weeks": 4, "estimated_hours": 9},
+            },
+            {
+                "stage": 3, "title": "综合实践与独立应用",
+                "objective": "将所学用于一个贴近真实需求的小项目",
+                "topics": ["需求分析", "方案设计", "实践与复盘"],
+                "prerequisites": ["掌握核心方法"],
+                "rationale": "通过完整实践检验能否迁移应用。",
+                "activities": ["完成一个范围可控的小项目", "记录问题、验证方法和改进"],
+                "learning_outcomes": ["能独立拆解任务并交付可解释的成果"],
+                "completion_evidence": ["项目成果、过程记录和复盘"],
+                "duration_range": {"min_weeks": 3, "max_weeks": 5, "estimated_hours": 12},
+            },
+        ]
+    criteria = [
+        {
+            "name": "核心理解", "description": "能准确解释目标领域的核心概念及原理。",
+            "points": 30,
+            "performance_levels": {
+                "excellent": "解释准确完整，并能联系新情境。",
+                "proficient": "能准确解释主要概念。",
+                "developing": "理解部分概念，但解释仍需提示。",
+                "beginning": "尚不能清楚说明基本概念。",
+            },
+            "evidence": ["概念解释", "问题分析"],
+            "minimum_score": None,
+        },
+        {
+            "name": "实践应用", "description": "能将所学方法用于完成实际任务。",
+            "points": 35,
+            "performance_levels": {
+                "excellent": "能独立完成并灵活迁移应用。",
+                "proficient": "能独立完成常见任务。",
+                "developing": "在提示下可以完成部分任务。",
+                "beginning": "尚不能完成基本实践任务。",
+            },
+            "evidence": ["阶段练习", "实践成果"],
+            "minimum_score": None,
+        },
+        {
+            "name": "分析与解决问题", "description": "能拆解问题、说明思路并验证结果。",
+            "points": 25,
+            "performance_levels": {
+                "excellent": "能系统分析、比较方案并验证结论。",
+                "proficient": "能合理拆解问题并验证主要结果。",
+                "developing": "能识别问题但分析或验证不完整。",
+                "beginning": "需要较多引导才能定位问题。",
+            },
+            "evidence": ["解题过程", "错误分析与修正记录"],
+            "minimum_score": None,
+        },
+        {
+            "name": "表达与复盘", "description": "能清楚呈现成果、依据和改进方向。",
+            "points": 10,
+            "performance_levels": {
+                "excellent": "表达清晰，有证据且能提出改进。",
+                "proficient": "能说明成果和主要依据。",
+                "developing": "说明不完整，依据较少。",
+                "beginning": "难以说明完成过程和结果。",
+            },
+            "evidence": ["成果说明", "学习复盘"],
+            "minimum_score": None,
+        },
+    ]
+    return {
+        "output_mode": "initial_draft",
+        "agreement_stage": "initial_draft",
+        "reply": (
+            "根据目前沟通的信息，我先给出一份可讨论的初版方案。\n\n"
+            f"**学习目标：** {goal}\n"
+            f"**基础判断：** {level or '暂按初学者起点设计，后续可根据实际表现调整'}。\n"
+            f"**时间假设：** {weekly_time}。\n\n"
+            "**学习路径：**\n"
+            + "\n".join(
+                f"{item['stage']}. **{item['title']}**：{item['objective']} "
+                f"预计 {item['duration_range']['min_weeks']}–{item['duration_range']['max_weeks']} 周。"
+                for item in path
+            )
+            + "\n\n**初步评分依据（总分 100）：** 核心理解 30 分、实践应用 35 分、"
+            "分析与解决问题 25 分、表达与复盘 10 分。每项按优秀、良好、发展中、初学四档表现评价；"
+            "建议总分达到 70 分视为阶段达标，具体标准可在下一轮一起调整。"
+            "\n\n这是一份讨论稿，不会启动正式训练。你可以先看看学习阶段和评分方向是否符合预期。"
+        ),
+        "ready": False,
+        "goal_summary": goal,
+        "learning_strategy": "先建立基础认知，再掌握核心方法，最后通过独立实践检验迁移能力。",
+        "learning_path": path,
+        "assessment_plan": {
+            "criteria": criteria,
+            "pass_threshold": 70,
+            "explanation": "综合评价理解、实践、问题解决和表达复盘，避免只以记忆或单次测验判断学习成果。",
+            "stage_completion_rules": ["提交阶段成果", "能够解释主要思路", "达到阶段评价标准；未达标时先补强再进入下一阶段"],
+            "assessment_policy": {"provisional": True, "review": "讨论后可调整权重和证据形式"},
+        },
+        "assumptions": [weekly_time, "工具和具体项目主题暂由教练推荐，讨论后可调整。"],
+        "revision_summary": {"changes": [], "reason": "首次生成初版讨论稿"},
+        "tasks": [],
+        "conversation_state": {
+            **state,
+            "phase": "initial_draft",
+            "current_draft_created": True,
+        },
+    }
+
+
 def _has_provisional_assessment(plan):
     if not isinstance(plan, dict):
         return False
@@ -544,8 +695,11 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 or not data.get("learning_path")
                 or not _has_provisional_assessment(data.get("assessment_plan"))
             ):
-                raise ValueError(
-                    "AI 连续两次未能按要求生成初版学习方案；已阻止通用兜底回复。请检查 AI 服务日志后重试。"
+                # Explicit learner request must still produce a usable discussion draft.
+                # Use a clearly provisional, non-activating baseline rather than failing
+                # after repeated provider schema drift.
+                data = _build_safe_initial_draft(
+                    history, user_message, conversation_state, data
                 )
     except AIResponseFormatError as exc:
         # Preserve readable conversation, but never create a proposal from unstructured text.
