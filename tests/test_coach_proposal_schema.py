@@ -154,7 +154,7 @@ def test_coach_message_preserves_unstructured_reply_without_creating_proposal(mo
             coach.AIResponseFormatError("格式不正确", "我们先从生活中的例子开始。")
         ),
     )
-    result = coach.coach_message([], "我想从零开始学习计算机。", "真实 AI")
+    result = coach.coach_message([], "我对计算机很感兴趣，想聊聊。", "真实 AI")
     assert result["reply"] == "我们先从生活中的例子开始。"
     assert result["ready"] is False
     assert result["tasks"] == []
