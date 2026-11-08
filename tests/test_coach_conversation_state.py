@@ -641,7 +641,7 @@ def test_explicit_final_plan_request_creates_pending_proposal_and_first_task(iso
         assert agreement.status == "pending"
         assert saved["phase"] == "final_proposal"
         proposal = json.loads(agreement.proposal_json)
-        assert proposal["task"]["title"] == "第一项任务：认识计算机系统的基本组成"
+        assert proposal["task"]["title"] == "解释计算机如何运行"
 
     confirmation = service.send_student_message(training_id, "确认开始训练", "真实 AI")
     assert "第一项任务" in confirmation
