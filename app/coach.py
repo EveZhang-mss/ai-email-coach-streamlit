@@ -408,7 +408,7 @@ The draft must be personalized to the learner's stated domain, goal, level, and 
 MVP AGREEMENT FLOW
 1. goal_discovery: understand the goal, rough level, purpose, and weekly time. Ask only what materially
    changes the plan. Aim for about 3–5 exchanges, but never enforce a turn count.
-2. initial_draft: show the complete provisional path and simple assessment approach. Include 3–5 stages;
+2. initial_draft: show the complete provisional path and provisional overall assessment framework in the same turn. Include 3–5 stages;
    for each stage describe objective, topics, practice, observable outcome, evidence, and rough duration.
    Assessment: 3–5 relevant criteria, short descriptions, integer weights totaling 100, and a pass line.
    Four-level performance bands, minimum_score, and detailed assessment policy are optional in this MVP.
