@@ -1,59 +1,43 @@
-from app.ai_assessment import assess_business_email
+"""Optional live DeepSeek smoke test.
 
-result = assess_business_email(
-    assignment="""
-Write a professional email to a university professor.
-Ask for a meeting to discuss an internship opportunity.
-Use a polite and professional tone.
-""",
-    submission="""
-Dear Professor Smith,
+Run explicitly with RUN_LIVE_AI_TESTS=1 pytest -q tests/test_deepseek_coach.py.
+Normal CI must never require paid API credentials or make external AI calls.
+"""
+import os
 
-I am writing to ask if you have time to meet with me
-to discuss an internship opportunity.
+import pytest
 
-I am very interested in your research and would appreciate
-the chance to learn more about your work.
-
-Please let me know if you are available next week.
-
-Best regards,
-Alex
-""",
-    rubric={
-        "task_completion": "Does the email fulfill the assignment?",
-        "professional_tone": "Is the tone polite and professional?",
-        "structure_clarity": "Is the email well organized?",
-        "grammar_vocabulary": "Is the English accurate and appropriate?",
-    },
-    pass_threshold=80,
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_LIVE_AI_TESTS") != "1",
+    reason="Live AI smoke test is opt-in; set RUN_LIVE_AI_TESTS=1 to run.",
 )
 
-print("\n========== AI 教练评估结果 ==========")
-print("总分：", result["score"])
-print("是否通过：", result["passed"])
 
-print("\n分项评分：")
-for name, item in result["dimensions"].items():
-    print(f"{name}: {item['score']}/25")
-    print("  ", item["comment"])
+def test_deepseek_assessment_live():
+    from app.ai_assessment import assess_business_email
 
-print("\n优点：")
-for item in result["strengths"]:
-    print("-", item)
-
-print("\n需要改进的地方：")
-for item in result["issues"]:
-    print("-", item.get("original"))
-    print("  问题：", item.get("problem"))
-    print("  建议：", item.get("suggestion"))
-
-print("\n参考改写：")
-print(result["rewrite"])
-
-print("\n下一步训练建议：")
-for item in result["next_steps"]:
-    print("-", item)
-
-print("\n总结：")
-print(result["summary"])
+    result = assess_business_email(
+        assignment=(
+            "Write a professional email to a university professor. "
+            "Ask for a meeting to discuss an internship opportunity."
+        ),
+        submission=(
+            "Dear Professor Smith,\n\n"
+            "I am writing to ask if you have time to meet with me "
+            "to discuss an internship opportunity.\n\n"
+            "I am very interested in your research and would appreciate "
+            "the chance to learn more about your work.\n\n"
+            "Please let me know if you are available next week.\n\n"
+            "Best regards,\nAlex"
+        ),
+        rubric={
+            "task_completion": "Does the email fulfill the assignment?",
+            "professional_tone": "Is the tone polite and professional?",
+            "structure_clarity": "Is the email well organized?",
+            "grammar_vocabulary": "Is the English accurate and appropriate?",
+        },
+        pass_threshold=80,
+    )
+    assert 0 <= result["score"] <= 100
+    assert isinstance(result["passed"], bool)
+    assert result["dimensions"]
