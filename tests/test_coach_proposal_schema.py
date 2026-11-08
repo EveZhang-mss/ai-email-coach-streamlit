@@ -123,7 +123,7 @@ def test_ready_false_never_returns_formal_tasks(monkeypatch):
 
 
 def test_json_parser_accepts_fenced_json():
-    parsed = coach._parse_json_object('\\`\\`\\`json\\n{"reply": "你好", "ready": false}\\n\\`\\`\\`')
+    parsed = coach._parse_json_object('\x60\x60\x60json\\n{"reply": "你好", "ready": false}\\n\x60\x60\x60')
     assert parsed == {"reply": "你好", "ready": False}
 
 
