@@ -93,7 +93,7 @@ def test_coach_prompt_uses_natural_non_repetitive_conversation(monkeypatch):
     assert "MUST produce output_mode=\"initial_draft\" in THIS turn" in prompt
     assert "followed tutorials and typed code" in prompt
     assert "provisional overall assessment framework" in prompt
-    assert "four-level performance bands are optional" in prompt
+    assert "Four-level performance bands" in prompt
     assert "No fixed word count" in prompt
     assert "10-minute challenge" in prompt
     assert "150–300 Chinese characters" not in prompt
