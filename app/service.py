@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from app.db import get_session, init_db
 from app.models import (
     Student, Training, EmailMessage, Task, Submission,
-    TrainingAgreement, ReminderPlan, EmailSubmissionLink, now_utc
+    TrainingAgreement, ReminderPlan, EmailSubmissionLink, CoachConversationState, now_utc
 )
 from app.coach import coach_message, generate_next_task
 from app.config import settings
@@ -332,10 +332,52 @@ def send_student_message(tid, message, mode):
             {"role": "user" if item.sender == "学员" else "assistant", "content": item.body}
             for item in sorted(training.messages, key=lambda item: item.created_at)
         ]
+        state_row = db.scalar(
+            select(CoachConversationState).where(
+                CoachConversationState.training_id == training.id
+            )
+        )
+        if state_row is None:
+            state_row = CoachConversationState(
+                training_id=training.id,
+                state_json=json.dumps({
+                    "phase": "goal_discovery",
+                    "phase_round": 0,
+                    "learner_profile": {},
+                    "agreed_points": [],
+                    "pending_questions": [],
+                    "last_discussed_topic": "",
+                    "next_step": "",
+                    "current_draft": {},
+                }, ensure_ascii=False),
+            )
+            db.add(state_row)
+            db.flush()
+        try:
+            conversation_state = json.loads(state_row.state_json or "{}")
+        except (TypeError, ValueError):
+            conversation_state = {}
         db.add(EmailMessage(training_id=tid, sender="学员", subject="训练沟通", body=message))
         db.flush()
-        reply = coach_message(history, message, mode)
+        reply = coach_message(
+            history, message, mode, conversation_state=conversation_state
+        )
         reply_text = reply.get("reply", "我们继续讨论你的训练目标。")
+        returned_state = reply.get("conversation_state")
+        if isinstance(returned_state, dict):
+            conversation_state.update(returned_state)
+        conversation_state["phase_round"] = int(conversation_state.get("phase_round", 0) or 0) + 1
+        if reply.get("agreement_stage"):
+            conversation_state["phase"] = reply["agreement_stage"]
+        if reply.get("output_mode") == "initial_draft":
+            conversation_state["current_draft"] = {
+                "goal_summary": reply.get("goal_summary", training.goal),
+                "learning_strategy": reply.get("learning_strategy", ""),
+                "learning_path": reply.get("learning_path", []),
+                "assumptions": reply.get("assumptions", []),
+            }
+        state_row.state_json = json.dumps(conversation_state, ensure_ascii=False)
+        db.flush()
         db.add(EmailMessage(training_id=tid, sender="AI 教练", subject="训练回复", body=reply_text))
         # The agreed goal is immutable during ordinary discussion. A new goal
         # is committed only when the learner confirms a versioned proposal.
