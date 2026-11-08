@@ -6,7 +6,7 @@ from app.models import (
     Student, Training, EmailMessage, Task, Submission,
     TrainingAgreement, ReminderPlan, EmailSubmissionLink, CoachConversationState, now_utc
 )
-from app.coach import coach_message, generate_next_task
+from app.coach import coach_message, generate_next_task, _normalize_learner_reply
 from app.config import settings
 from app.ai_assessment import assess_submission
 def initialize():
@@ -372,12 +372,33 @@ def send_student_message(tid, message, mode):
             conversation_state = json.loads(state_row.state_json or "{}")
         except (TypeError, ValueError):
             conversation_state = {}
+        # Deterministically retain facts the learner has already supplied. The model
+        # may enrich this profile, but it must not erase known facts on later turns.
+        learner_profile = conversation_state.get("learner_profile")
+        if not isinstance(learner_profile, dict):
+            learner_profile = {}
+        known_messages = [
+            item.get("content", "") for item in history if item.get("role") == "user"
+        ] + [message]
+        combined_facts = "\n".join(str(item) for item in known_messages)
+        if any(term in combined_facts for term in ("想学计算机", "学习计算机", "计算机基础", "工程师思维")):
+            learner_profile.setdefault("goal", "学习计算机基础知识，培养工程师思维")
+        if any(term in combined_facts for term in ("写过简单的代码", "写过简单代码", "写过代码", "敲过代码")):
+            learner_profile["level"] = "写过简单代码，有少量编程经验的初学者"
+        import re
+        time_match = re.search(r"每周\s*(\d+(?:\.\d+)?)\s*(小时|个小时|h)\b", combined_facts, re.IGNORECASE)
+        if time_match:
+            learner_profile["weekly_hours"] = float(time_match.group(1))
+        conversation_state["learner_profile"] = learner_profile
+
         db.add(EmailMessage(training_id=tid, sender="学员", subject="训练沟通", body=message))
         db.flush()
         reply = coach_message(
             history, message, mode, conversation_state=conversation_state
         )
-        reply_text = reply.get("reply", "我们继续讨论你的训练目标。")
+        reply_text = _normalize_learner_reply(
+            reply.get("reply", "我们继续讨论你的训练目标。")
+        )
         previous_phase = conversation_state.get("phase", "goal_discovery")
         previous_round = int(conversation_state.get("phase_round", 0) or 0)
         returned_state = reply.get("conversation_state")
@@ -417,11 +438,11 @@ def send_student_message(tid, message, mode):
         if reply.get("ready") and reply.get("tasks") and not training.tasks and training.status in {"planning", "awaiting_confirmation"}:
             agreement = _create_agreement(db, training, reply, "initial_training")
             reply_text += (
-                f"\\n\\n我已经整理好一份完整的初步学习方案（第 {agreement.version} 版）。"
-                "\\n你不需要先决定技术工具，也不需要理解所有专业术语。"
-                "\\n请先看看整体方向是否符合你的兴趣和时间安排；任何地方都可以用自己的话提出疑问或修改意见。"
-                "\\n如果整体方向可以开始，请回复：确认开始训练"
-                "\\n如果暂时不接受，请回复：拒绝训练提议"
+                f"\n\n我已经整理好一份完整的初步学习方案（第 {agreement.version} 版）。"
+                "\n你不需要先决定技术工具，也不需要理解所有专业术语。"
+                "\n请先看看整体方向是否符合你的兴趣和时间安排；任何地方都可以用自己的话提出疑问或修改意见。"
+                "\n如果整体方向可以开始，请回复：确认开始训练"
+                "\n如果暂时不接受，请回复：拒绝训练提议"
             )
             db.add(EmailMessage(
                 training_id=tid, sender="AI 教练",
