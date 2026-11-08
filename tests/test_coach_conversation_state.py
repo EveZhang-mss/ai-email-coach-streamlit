@@ -407,7 +407,7 @@ def test_explicit_plan_with_missing_reply_uses_safe_draft(monkeypatch):
 
 
 def test_escaped_newlines_are_rendered_as_real_line_breaks():
-    raw = r"第一段\\n\\n第二段"
+    raw = r"第一段\n\n第二段"
     normalized = coach._normalize_learner_reply(raw)
     assert normalized == "第一段\n\n第二段"
     assert "\\n" not in normalized
