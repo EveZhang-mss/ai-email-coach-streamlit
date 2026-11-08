@@ -474,7 +474,8 @@ learner's explicit "确认开始训练" before creating the formal task and acti
             "revision_summary": {"changes": [], "reason": ""},
             "tasks": [],
         }
-    if not isinstance(data.get("reply"), str) or not data["reply"].strip():\n        raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
+    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
+        raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
     data.setdefault("ready", False)
     data.setdefault("agreement_stage", "goal_discovery")
     data.setdefault("stage_progress", {"current_stage": data["agreement_stage"], "what_is_agreed": [], "still_to_discuss": [], "next_step": ""})
