@@ -6,7 +6,10 @@ from app.models import (
     Student, Training, EmailMessage, Task, Submission,
     TrainingAgreement, ReminderPlan, EmailSubmissionLink, CoachConversationState, now_utc
 )
-from app.coach import (\n    coach_message, generate_next_task, _normalize_learner_reply,\n    _build_safe_initial_draft, _mock_task,\n)
+from app.coach import (
+    coach_message, generate_next_task, _normalize_learner_reply,
+    _build_safe_initial_draft, _mock_task,
+)
 from app.config import settings
 from app.ai_assessment import assess_submission
 def initialize():
