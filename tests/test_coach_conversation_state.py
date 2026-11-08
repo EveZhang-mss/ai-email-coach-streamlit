@@ -154,7 +154,7 @@ def test_sufficient_goal_and_experience_force_initial_draft_retry(monkeypatch):
         ],
         "我照着教程敲过代码，但基本忘了，也想培养自己开发程序的能力。",
         "真实 AI",
-        conversation_state={"phase": "goal_discovery", "phase_round": 1},
+        conversation_state={"phase": "detail_negotiation", "phase_round": 4, "current_draft": {}},
     )
 
     assert len(calls) == 2
