@@ -92,6 +92,8 @@ def test_coach_prompt_uses_natural_non_repetitive_conversation(monkeypatch):
     assert "PROACTIVE INITIAL-DRAFT TRIGGER — HIGHEST PRIORITY" in prompt
     assert "MUST produce output_mode=\"initial_draft\" in THIS turn" in prompt
     assert "followed tutorials and typed code" in prompt
+    assert "provisional overall assessment framework" in prompt
+    assert "four observable performance_levels" in prompt
     assert "No fixed word count" in prompt
     assert "10-minute challenge" in prompt
     assert "150–300 Chinese characters" not in prompt
@@ -120,6 +122,25 @@ def test_sufficient_goal_and_experience_force_initial_draft_retry(monkeypatch):
             "ready": False,
             "agreement_stage": "initial_draft",
             "learning_path": [{"stage": 1, "title": "编程基础"}],
+            "assessment_plan": {
+                "criteria": [{
+                    "name": "独立解决问题",
+                    "description": "能拆解并解决基础问题",
+                    "points": 100,
+                    "performance_levels": {
+                        "excellent": "能独立迁移应用",
+                        "proficient": "能独立完成常见问题",
+                        "developing": "需要提示才能完成",
+                        "beginning": "尚不能说明基本思路",
+                    },
+                    "evidence": ["阶段项目"],
+                    "minimum_score": None,
+                }],
+                "pass_threshold": 70,
+                "explanation": "依据阶段成果评价",
+                "stage_completion_rules": ["提交并解释阶段成果"],
+                "assessment_policy": {},
+            },
             "assumptions": ["每周投入时间暂按可调整安排处理"],
             "conversation_state": {"phase": "initial_draft"},
             "tasks": [],
@@ -141,6 +162,7 @@ def test_sufficient_goal_and_experience_force_initial_draft_retry(monkeypatch):
     assert result["output_mode"] == "initial_draft"
     assert result["agreement_stage"] == "initial_draft"
     assert result["learning_path"]
+    assert result["assessment_plan"]["criteria"]
     assert result["ready"] is False
 
 
@@ -150,10 +172,16 @@ def test_initial_draft_trigger_recognizes_beginner_experience():
         "我照着教程敲过代码，但基本忘了。",
         {"phase": "goal_discovery"},
     )
+    # A model-assigned detail_negotiation phase must not block a missing first draft.
+    assert coach._should_force_initial_draft(
+        [{"role": "user", "content": "我想学习计算机相关的基础知识。"}],
+        "我照着教程敲过代码，但基本忘了。",
+        {"phase": "detail_negotiation", "current_draft": {}},
+    )
     assert not coach._should_force_initial_draft(
         [{"role": "user", "content": "我想学习计算机相关的基础知识。"}],
         "我照着教程敲过代码，但基本忘了。",
-        {"phase": "detail_negotiation"},
+        {"phase": "active_learning"},
     )
 
 def test_conversation_mode_never_creates_formal_tasks(monkeypatch):
@@ -183,6 +211,10 @@ def test_initial_draft_is_saved_as_conversation_state_not_activated(isolated_db,
             "goal_summary": "从零开始理解计算机系统",
             "learning_strategy": "先理解原理，再进行简单实践。",
             "learning_path": [{"stage": 1, "title": "认识计算机如何运行"}],
+            "assessment_plan": {
+                "criteria": [{"name": "理解与应用", "points": 100}],
+                "pass_threshold": 70,
+            },
             "assumptions": ["暂按每周3小时安排"],
             "tasks": [],
             "conversation_state": {
@@ -216,3 +248,4 @@ def test_initial_draft_is_saved_as_conversation_state_not_activated(isolated_db,
         assert training.tasks == []
         assert saved["phase"] == "initial_draft"
         assert saved["current_draft"]["learning_path"][0]["title"] == "认识计算机如何运行"
+        assert saved["current_draft"]["assessment_plan"]["criteria"][0]["name"] == "理解与应用"
