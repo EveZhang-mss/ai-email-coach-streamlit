@@ -131,7 +131,11 @@ def _validate_task(task):
 def _should_force_initial_draft(history, user_message, conversation_state):
     """Detect a new learner who has shared a goal and enough level evidence to draft."""
     state = conversation_state if isinstance(conversation_state, dict) else {}
-    if state.get("current_draft") or state.get("phase") not in (None, "", "goal_discovery"):
+    # Do not let a model-assigned negotiation phase block the first draft.
+    # The only reliable blocker is an already persisted, non-empty draft.
+    if isinstance(state.get("current_draft"), dict) and state["current_draft"].get("learning_path"):
+        return False
+    if state.get("phase") == "active_learning":
         return False
     text = "\\n".join(
         str(item.get("content", "")) for item in history
@@ -389,10 +393,16 @@ Return ONLY valid JSON. Select output_mode according to the current work:
     "conversation_state":{"phase":"","phase_round":0,"learner_profile":{},"agreed_points":[],
       "pending_questions":[],"last_discussed_topic":"","next_step":""}}
    Do not emit full curriculum, rubric, assessment plan, or tasks in this mode.
-2. "initial_draft": when enough goal context exists to show the first complete learning-direction draft.
+2. "initial_draft": once the essential learner context is sufficient, show the complete provisional
+   learning direction AND a provisional overall assessment framework in the SAME turn.
    Return reply, ready=false, agreement_stage="initial_draft", stage_progress, conversation_state,
-   goal_summary, learning_strategy, learning_path, assumptions. No formal assessment rubric or task
-   is required yet. Explain the whole direction in learner-facing language.
+   goal_summary, learning_strategy, learning_path, assessment_plan, assumptions.
+   assessment_plan must include criteria with name, description, positive integer points totaling 100,
+   four observable performance_levels (excellent, proficient, developing, beginning), evidence,
+   minimum_score (integer or null), pass_threshold, explanation, stage_completion_rules, and
+   assessment_policy. These are provisional discussion standards, not an activated grading contract.
+   Do not generate tasks or task rubrics in this mode. Explain both the path and how progress will be
+   judged in learner-facing Chinese. Clearly mark assumptions and invite feedback.
 3. "final_proposal": after detail negotiation is complete. Return the complete formal structure:
    reply, ready=true, agreement_stage="final_proposal", stage_progress, conversation_state,
    goal_summary, learning_strategy, learning_path, assessment_plan, remediation_policy,
@@ -430,6 +440,9 @@ learner's explicit "确认开始训练" before creating the formal task and acti
             }
             or not isinstance(data.get("learning_path"), list)
             or not data.get("learning_path")
+            or not isinstance(data.get("assessment_plan"), dict)
+            or not isinstance(data["assessment_plan"].get("criteria"), list)
+            or not data["assessment_plan"].get("criteria")
         ):
             # One explicit repair attempt prevents a generic conversation reply
             # from silently replacing a required provisional learning direction.
@@ -437,8 +450,9 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 user_prompt
                 + "\\n\\nSYSTEM CHECK: The learner has already supplied enough context for a provisional "
                 "learning direction. Your previous response did not satisfy this requirement. "
-                "Return output_mode=initial_draft NOW, with a learner-facing Chinese reply and a "
-                "non-empty staged learning_path. Missing weekly hours may be stated as an adjustable "
+                "Return output_mode=initial_draft NOW, with a learner-facing Chinese reply, a "
+                "non-empty staged learning_path, AND a provisional assessment_plan with weighted criteria "
+                "and four performance levels. Missing weekly hours may be stated as an adjustable "
                 "assumption; do not ask another discovery question first. Do not return conversation mode."
             )
             data = _call_ai_json(
@@ -452,6 +466,9 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 or not str(data.get("reply", "")).strip()
                 or not isinstance(data.get("learning_path"), list)
                 or not data.get("learning_path")
+                or not isinstance(data.get("assessment_plan"), dict)
+                or not isinstance(data["assessment_plan"].get("criteria"), list)
+                or not data["assessment_plan"].get("criteria")
             ):
                 raise ValueError(
                     "AI 连续两次未能按要求生成初版学习方案；已阻止通用兜底回复。请检查 AI 服务日志后重试。"
