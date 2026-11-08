@@ -386,10 +386,30 @@ def send_student_message(tid, message, mode):
         if any(term in combined_facts for term in ("写过简单的代码", "写过简单代码", "写过代码", "敲过代码")):
             learner_profile["level"] = "写过简单代码，有少量编程经验的初学者"
         import re
-        time_match = re.search(r"每周\s*(\d+(?:\.\d+)?)\s*(小时|个小时|h)\b", combined_facts, re.IGNORECASE)
+        time_match = re.search(
+            r"每周(?:有)?\s*(\d+(?:\.\d+)?|一|二|三|四|五|六|七|八|九|十)\s*(?:个)?\s*(小时|h)",
+            combined_facts, re.IGNORECASE
+        )
         if time_match:
-            learner_profile["weekly_hours"] = float(time_match.group(1))
+            hour_token = time_match.group(1)
+            chinese_hours = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+                             "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+            learner_profile["weekly_hours"] = float(
+                chinese_hours.get(hour_token, hour_token)
+            )
         conversation_state["learner_profile"] = learner_profile
+        # Keep the saved draft aligned with new constraints without discarding its path.
+        current_draft = conversation_state.get("current_draft")
+        if isinstance(current_draft, dict) and learner_profile.get("weekly_hours"):
+            current_draft["weekly_hours"] = learner_profile["weekly_hours"]
+            current_draft["learner_profile"] = dict(learner_profile)
+            assumptions = current_draft.get("assumptions")
+            if isinstance(assumptions, list):
+                current_draft["assumptions"] = [
+                    item for item in assumptions
+                    if "每周" not in str(item) and "投入时间" not in str(item)
+                ] + [f"每周投入 {learner_profile['weekly_hours']:g} 小时"]
+
 
         db.add(EmailMessage(training_id=tid, sender="学员", subject="训练沟通", body=message))
         db.flush()
