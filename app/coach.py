@@ -153,7 +153,7 @@ def _should_force_initial_draft(history, user_message, conversation_state):
         "想学", "想培养", "学习", "希望掌握", "提升能力", "开发程序", "工程师思维"
     ))
     has_level_evidence = any(term in text for term in (
-        "零基础", "没有基础", "没学过", "教程", "敲过代码", "写过代码",
+        "零基础", "没有基础", "没学过", "从零开始", "没有编程基础", "教程", "敲过代码", "写过代码",
         "接触过编程", "学过编程", "基本上已经忘了", "有基础"
     ))
     return has_goal and has_level_evidence
@@ -350,6 +350,7 @@ def _build_safe_initial_draft(history, user_message, conversation_state, partial
 
 
 def _has_provisional_assessment(plan):
+    """MVP assessment: useful criteria and a clear pass line; no four-level rubric required."""
     if not isinstance(plan, dict):
         return False
     criteria = plan.get("criteria")
@@ -365,25 +366,13 @@ def _has_provisional_assessment(plan):
         if not all(isinstance(item.get(key), str) and item[key].strip()
                    for key in ("name", "description")):
             return False
-        levels = item.get("performance_levels")
-        if not isinstance(levels, dict) or any(
-            not isinstance(levels.get(level), str) or not levels[level].strip()
-            for level in ("excellent", "proficient", "developing", "beginning")
-        ):
-            return False
-        if not isinstance(item.get("evidence"), list):
-            return False
         weights.append(points)
-    threshold = plan.get("pass_threshold")
+    threshold = plan.get("pass_threshold", settings.pass_threshold)
     return (
         sum(weights) == 100
         and isinstance(threshold, int)
         and not isinstance(threshold, bool)
         and 0 <= threshold <= 100
-        and isinstance(plan.get("explanation"), str)
-        and bool(plan["explanation"].strip())
-        and isinstance(plan.get("stage_completion_rules"), list)
-        and isinstance(plan.get("assessment_policy"), dict)
     )
 
 
@@ -634,7 +623,7 @@ Return ONLY valid JSON. Select output_mode according to the current work:
    Return reply, ready=false, agreement_stage="initial_draft", stage_progress, conversation_state,
    goal_summary, learning_strategy, learning_path, assessment_plan, assumptions.
    assessment_plan must include criteria with name, description, positive integer points totaling 100,
-   four observable performance_levels (excellent, proficient, developing, beginning), evidence,
+   brief observable descriptions and evidence when useful,
    minimum_score (integer or null), pass_threshold, explanation, stage_completion_rules, and
    assessment_policy. These are provisional discussion standards, not an activated grading contract.
    Do not generate tasks or task rubrics in this mode. Explain both the path and how progress will be
@@ -712,28 +701,55 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                     history, user_message, conversation_state, data
                 )
     except AIResponseFormatError as exc:
-        # Preserve readable conversation, but never create a proposal from unstructured text.
-        # Preserve ordinary natural-language replies, but never expose raw JSON/provider payloads.
-        raw_reply = str(exc.raw_content or "").strip()
-        if raw_reply and not raw_reply.startswith(("{", "```")):
-            fallback_reply = raw_reply
-        else:
-            fallback_reply = (
-                "刚才生成学习方案时出现了格式问题，内容没有正确显示。"
-                "请再发送一次“需要学习方案”，我会重新整理；无需重复提供之前的信息。"
+        # A formatting failure must never block an explicitly requested first draft.
+        # The fallback is clearly labelled as a provisional baseline, never a confirmed plan.
+        if force_initial_draft:
+            data = _build_safe_initial_draft(
+                history, user_message, conversation_state, partial={}
             )
-        return {
-            "reply": fallback_reply,
-            "ready": False,
-            "goal_summary": user_message.strip(),
-            "learning_strategy": "",
-            "learning_path": [],
-            "assessment_plan": {},
-            "remediation_policy": {},
-            "assumptions": [],
-            "revision_summary": {"changes": [], "reason": ""},
-            "tasks": [],
-        }
+            data["reply"] = (
+                "我先根据目前已提供的信息整理一份可讨论的初版方案。"
+                "由于本轮 AI 输出格式异常，以下内容先作为可调整的基础草案；"
+                "你不需要重新提供已经说过的信息。\n\n"
+                + data["reply"]
+            )
+        else:
+            raw_reply = str(exc.raw_content or "").strip()
+            # Plain language can be shown; JSON, code fences and provider payloads cannot.
+            fallback_reply = raw_reply if raw_reply and not raw_reply.startswith(("{", "```")) else (
+                "刚才生成回复时遇到格式问题，但之前的沟通记录已保留。"
+                "你可以继续提出问题，或发送“需要学习方案”让我整理初版方案。"
+            )
+            return {
+                "reply": fallback_reply,
+                "ready": False,
+                "output_mode": "conversation",
+                "agreement_stage": (conversation_state or {}).get("phase", "goal_discovery"),
+                "goal_summary": user_message.strip(),
+                "learning_strategy": "",
+                "learning_path": [],
+                "assessment_plan": {},
+                "remediation_policy": {},
+                "assumptions": [],
+                "revision_summary": {"changes": [], "reason": ""},
+                "tasks": [],
+                "conversation_state": conversation_state or {},
+            }
+    except Exception:
+        # Provider timeouts/errors are isolated from workflow state. If the learner
+        # explicitly asked for a draft, return a labelled provisional baseline.
+        if not force_initial_draft:
+            return {
+                "reply": "AI 服务暂时没有成功返回内容，之前的沟通记录已保留。请稍后重试；无需重新介绍学习目标。",
+                "ready": False, "output_mode": "conversation",
+                "agreement_stage": (conversation_state or {}).get("phase", "goal_discovery"),
+                "tasks": [], "conversation_state": conversation_state or {},
+            }
+        data = _build_safe_initial_draft(history, user_message, conversation_state, partial={})
+        data["reply"] = (
+            "AI 服务本轮暂时不可用。为避免让沟通卡住，我先提供一份明确标记为临时讨论稿的基础方案；"
+            "恢复连接后可以再结合你的领域细化。\n\n" + data["reply"]
+        )
     if not isinstance(data.get("reply"), str) or not data["reply"].strip():
         raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
     data.setdefault("ready", False)
@@ -797,47 +813,18 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                     or not isinstance(hours, (int, float)) or isinstance(hours, bool)
                     or hours <= 0):
                 raise ValueError(f"第 {index} 阶段的预计时间范围不合理。")
-        if not isinstance(assessment_plan, dict) or not isinstance(
-            assessment_plan.get("criteria"), list
-        ) or not assessment_plan["criteria"]:
-            raise ValueError("正式训练提议必须包含整体评分体系。")
-        criteria = assessment_plan["criteria"]
-        if any(not isinstance(item, dict) for item in criteria):
-            raise ValueError("整体评分维度格式不正确。")
-        weights = [item.get("points") for item in criteria]
-        if any(not isinstance(points, int) or isinstance(points, bool) or points <= 0
-               for points in weights) or sum(weights) != 100:
-            raise ValueError("整体评分体系各维度必须使用正整数权重，且合计 100。")
-        for item in criteria:
-            if any(not isinstance(item.get(key), str) or not item[key].strip()
-                   for key in ("name", "description")):
-                raise ValueError("每个整体评分维度都必须包含名称和能力描述。")
-            levels = item.get("performance_levels")
-            if not isinstance(levels, dict) or any(
-                not isinstance(levels.get(level), str) or not levels[level].strip()
-                for level in ("excellent", "proficient", "developing", "beginning")
-            ):
-                raise ValueError("每个整体评分维度都必须包含四档具体表现描述。")
-            if not isinstance(item.get("evidence"), list):
-                raise ValueError("每个整体评分维度都必须提供评价证据。")
-            minimum_score = item.get("minimum_score")
-            if minimum_score is not None and (
-                not isinstance(minimum_score, int) or isinstance(minimum_score, bool)
-                or not 0 <= minimum_score <= 100
-            ):
-                raise ValueError("评分维度 minimum_score 必须是 0–100 的整数或 null。")
-        threshold = assessment_plan.get("pass_threshold")
-        if not isinstance(threshold, int) or isinstance(threshold, bool) or not 0 <= threshold <= 100:
-            raise ValueError("整体评分通过标准必须是 0–100 的整数。")
-        for key in ("explanation",):
-            if not isinstance(assessment_plan.get(key), str) or not assessment_plan[key].strip():
-                raise ValueError("整体评分体系必须包含评分说明。")
-        if not isinstance(assessment_plan.get("stage_completion_rules"), list):
-            raise ValueError("stage_completion_rules 必须是数组。")
-        if not isinstance(assessment_plan.get("assessment_policy"), dict):
-            raise ValueError("assessment_policy 必须是对象。")
-        if not isinstance(data.get("remediation_policy"), dict) or not data["remediation_policy"]:
-            raise ValueError("正式训练提议必须包含自适应补强策略。")
+        if not _has_provisional_assessment(assessment_plan):
+            raise ValueError("正式方案必须包含评分维度、合计 100 分的权重和通过标准。")
+        # Optional advanced rubric detail is retained when supplied, but it is not
+        # required for the MVP to move from proposal to confirmation.
+        assessment_plan.setdefault("explanation", "根据学习目标、阶段成果和实际作业综合评价。")
+        assessment_plan.setdefault("stage_completion_rules", ["提交阶段成果并能说明主要思路。"])
+        assessment_plan.setdefault("assessment_policy", {"evidence_based": True})
+        data["assessment_plan"] = assessment_plan
+        if not isinstance(data.get("remediation_policy"), dict):
+            data["remediation_policy"] = {
+                "principle": "发现明显差距时先提供针对性补强建议；重大路径调整须经学员确认。"
+            }
         if not isinstance(data.get("assumptions"), list):
             raise ValueError("assumptions 必须是数组。")
         if not isinstance(data.get("revision_summary"), dict):
@@ -849,38 +836,11 @@ learner's explicit "确认开始训练" before creating the formal task and acti
         data["tasks"] = []
         if data.get("output_mode") == "initial_draft":
             provisional = data.get("assessment_plan")
-            if not isinstance(provisional, dict) or not isinstance(
-                provisional.get("criteria"), list
-            ) or not provisional["criteria"]:
-                raise ValueError("初版学习方案必须同时包含初步评分依据。")
-            criteria = provisional["criteria"]
-            if any(not isinstance(item, dict) for item in criteria):
-                raise ValueError("初版评分维度格式不正确。")
-            weights = [item.get("points") for item in criteria]
-            if any(not isinstance(points, int) or isinstance(points, bool) or points <= 0
-                   for points in weights) or sum(weights) != 100:
-                raise ValueError("初版评分维度权重必须为正整数，且合计 100。")
-            for item in criteria:
-                if any(not isinstance(item.get(key), str) or not item[key].strip()
-                       for key in ("name", "description")):
-                    raise ValueError("初版评分维度必须说明名称和评价内容。")
-                levels = item.get("performance_levels")
-                if not isinstance(levels, dict) or any(
-                    not isinstance(levels.get(level), str) or not levels[level].strip()
-                    for level in ("excellent", "proficient", "developing", "beginning")
-                ):
-                    raise ValueError("初版评分维度必须包含四档具体表现标准。")
-                if not isinstance(item.get("evidence"), list):
-                    raise ValueError("初版评分维度必须说明评价证据。")
-            threshold = provisional.get("pass_threshold")
-            if not isinstance(threshold, int) or isinstance(threshold, bool) or not 0 <= threshold <= 100:
-                raise ValueError("初版评分体系必须说明通过标准。")
-            if not isinstance(provisional.get("explanation"), str) or not provisional["explanation"].strip():
-                raise ValueError("初版评分体系必须解释评分依据。")
-            if not isinstance(provisional.get("stage_completion_rules"), list):
-                raise ValueError("初版评分体系必须说明阶段完成规则。")
-            if not isinstance(provisional.get("assessment_policy"), dict):
-                raise ValueError("初版评分体系必须包含评价原则。")
+            if not _has_provisional_assessment(provisional):
+                raise ValueError("初版方案必须包含评分维度、合计 100 分的权重和通过标准。")
+            provisional.setdefault("explanation", "根据阶段成果和实际作业判断是否掌握。")
+            provisional.setdefault("stage_completion_rules", ["提交阶段成果并能说明主要思路。"])
+            provisional.setdefault("assessment_policy", {"provisional": True})
     return data
 
 
