@@ -403,3 +403,91 @@ def test_explicit_plan_with_missing_reply_uses_safe_draft(monkeypatch):
     assert result["assessment_plan"]["criteria"]
     assert result["reply"]
     assert result["tasks"] == []
+
+
+
+def test_escaped_newlines_are_rendered_as_real_line_breaks():
+    raw = r"第一段\\n\\n第二段"
+    normalized = coach._normalize_learner_reply(raw)
+    assert normalized == "第一段\n\n第二段"
+    assert "\\n" not in normalized
+
+
+def test_service_retains_goal_level_and_chinese_weekly_hours(isolated_db, monkeypatch):
+    seen = []
+
+    def fake_coach(history, message, mode, conversation_state=None):
+        seen.append(json.loads(json.dumps(conversation_state or {}, ensure_ascii=False)))
+        state = dict(conversation_state or {})
+        state["phase"] = "detail_negotiation"
+        return {
+            "output_mode": "conversation",
+            "agreement_stage": "detail_negotiation",
+            "reply": "已记录你的补充，我们继续细化学习方案。",
+            "ready": False,
+            "tasks": [],
+            "conversation_state": state,
+        }
+
+    monkeypatch.setattr(service, "coach_message", fake_coach)
+    with get_session() as db:
+        student = Student(name="Context learner", email="context-retention@example.com")
+        db.add(student)
+        db.flush()
+        training = Training(student_id=student.id, goal="", status="planning")
+        db.add(training)
+        db.commit()
+        training_id = training.id
+
+    service.send_student_message(training_id, "我想学计算机基础知识，培养工程师思维。", "真实 AI")
+    service.send_student_message(training_id, "写过简单的代码。", "真实 AI")
+    service.send_student_message(training_id, "我每周有五个小时的时间，其他的都合适。", "真实 AI")
+
+    profile = seen[-1]["learner_profile"]
+    assert profile["goal"] == "学习计算机基础知识，培养工程师思维"
+    assert profile["level"] == "写过简单代码，有少量编程经验的初学者"
+    assert profile["weekly_hours"] == 5.0
+
+
+def test_existing_draft_prompt_forbids_restarting_discovery(monkeypatch):
+    captured = {}
+
+    def fake_call(system_prompt, user_prompt, **kwargs):
+        captured["system"] = system_prompt
+        captured["user"] = user_prompt
+        return {
+            "output_mode": "conversation",
+            "reply": "我会按每周五小时调整方案。",
+            "ready": False,
+            "agreement_stage": "detail_negotiation",
+            "conversation_state": {"phase": "detail_negotiation"},
+            "tasks": [],
+        }
+
+    monkeypatch.setattr(coach, "_call_ai_json", fake_call)
+    coach.coach_message(
+        [
+            {"role": "user", "content": "我想学计算机基础知识，培养工程师思维。"},
+            {"role": "assistant", "content": "你写过代码吗？"},
+            {"role": "user", "content": "写过简单的代码。"},
+            {"role": "assistant", "content": "这是初版学习方案。"},
+        ],
+        "我每周有五个小时的时间，其他的都合适。",
+        "真实 AI",
+        conversation_state={
+            "phase": "initial_draft",
+            "learner_profile": {
+                "goal": "学习计算机基础知识，培养工程师思维",
+                "level": "写过简单代码，有少量编程经验的初学者",
+                "weekly_hours": 5,
+            },
+            "current_draft": {
+                "learning_path": [{"stage": 1, "title": "计算机基础"}],
+                "assumptions": ["每周投入时间待确认"],
+            },
+        },
+    )
+    assert "NEVER restart goal/level discovery" in captured["system"]
+    assert "其他的都合适" in captured["system"]
+    assert "weekly_hours" in captured["user"]
+    assert "每周有五个小时" in captured["user"]
