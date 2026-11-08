@@ -275,3 +275,16 @@ class EmailSubmissionLink(Base):
     submission_id: Mapped[int] = mapped_column(
         ForeignKey("submissions.id"), unique=True, index=True
     )
+
+class CoachConversationState(Base):
+    """Durable coaching negotiation state, separate from immutable message history."""
+    __tablename__ = "coach_conversation_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    training_id: Mapped[int] = mapped_column(
+        ForeignKey("trainings.id"), unique=True, index=True
+    )
+    state_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=now_utc, onupdate=now_utc
+    )
