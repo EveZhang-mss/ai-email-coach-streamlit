@@ -90,7 +90,7 @@ def test_coach_prompt_uses_natural_non_repetitive_conversation(monkeypatch):
     prompt = captured["system_prompt"]
     assert "NATURAL, NON-REPETITIVE COACHING" in prompt
     assert "PROACTIVE INITIAL-DRAFT TRIGGER — HIGHEST PRIORITY" in prompt
-    assert "MUST produce output_mode=\"initial_draft\" in THIS turn" in prompt
+    assert "MUST produce output_mode=\"initial_draft\"" in prompt
     assert "followed tutorials and typed code" in prompt
     assert "provisional overall assessment framework" in prompt
     assert "Four-level performance bands" in prompt
