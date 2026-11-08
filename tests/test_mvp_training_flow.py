@@ -114,3 +114,49 @@ def test_mvp_draft_review_final_confirmation_creates_one_task(monkeypatch, isola
             "我想学习计算机基础，培养工程师思维。",
             "初版方向可以，请整理最终方案。",
         ]
+
+
+
+def test_mock_mode_obeys_same_explicit_confirmation_gate(isolated_db):
+    with get_session() as db:
+        student = Student(name="Mock learner", email="mock-flow@example.com")
+        db.add(student)
+        db.flush()
+        training = Training(student_id=student.id, goal="", status="planning")
+        db.add(training)
+        db.commit()
+        training_id = training.id
+
+    service.send_student_message(
+        training_id, "我想学习计算机基础，培养工程师思维。", "模拟 AI"
+    )
+    service.send_student_message(training_id, "我是零基础。", "模拟 AI")
+
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        state = db.scalar(select(TrainingAgreement).where(
+            TrainingAgreement.training_id == training_id
+        ))
+        assert training.status == "planning"
+        assert training.tasks == []
+        assert state is None
+
+    final_reply = service.send_student_message(
+        training_id, "整理最终方案", "模拟 AI"
+    )
+    assert "确认开始训练" in final_reply
+
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        agreement = db.scalar(select(TrainingAgreement).where(
+            TrainingAgreement.training_id == training_id
+        ))
+        assert training.status == "awaiting_confirmation"
+        assert agreement.status == "pending"
+        assert training.tasks == []
+
+    service.send_student_message(training_id, "确认开始训练", "模拟 AI")
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        assert training.status == "active"
+        assert len(training.tasks) == 1
