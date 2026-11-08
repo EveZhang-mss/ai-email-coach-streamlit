@@ -71,8 +71,9 @@ def test_initial_proposal_waits_for_explicit_confirmation(isolated_db):
         assert task.sequence_no == 1
         assert training.status == "active"
         assert json.loads(task.rubric)["criteria"][0]["name"] == "Message clarity"
-        with pytest.raises(ValueError):
-            confirm_training_agreement(db, training, "initial_training")
+        repeated_task = confirm_training_agreement(db, training, "initial_training")
+        assert repeated_task.id == task.id
+        assert len(training.tasks) == 1
 
 
 def test_rejecting_next_task_keeps_existing_training_and_task(isolated_db):
