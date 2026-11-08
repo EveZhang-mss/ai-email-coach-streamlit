@@ -131,6 +131,14 @@ def _validate_task(task):
 def _should_force_initial_draft(history, user_message, conversation_state):
     """Detect a new learner who has shared a goal and enough level evidence to draft."""
     state = conversation_state if isinstance(conversation_state, dict) else {}
+    latest = str(user_message or "").strip()
+    explicit_plan_request = any(term in latest for term in (
+        "需要学习方案", "需要方案", "请生成学习方案", "请给我学习方案",
+        "给我学习方案", "输出学习方案", "直接出方案", "直接生成方案",
+        "请直接给方案", "我想要学习方案",
+    ))
+    if explicit_plan_request:
+        return state.get("phase") != "active_learning"
     # Do not let a model-assigned negotiation phase block the first draft.
     # The only reliable blocker is an already persisted, non-empty draft.
     if isinstance(state.get("current_draft"), dict) and state["current_draft"].get("learning_path"):
@@ -149,6 +157,35 @@ def _should_force_initial_draft(history, user_message, conversation_state):
         "接触过编程", "学过编程", "基本上已经忘了", "有基础"
     ))
     return has_goal and has_level_evidence
+
+
+def _unwrap_nested_coach_payload(data):
+    """Unwrap a JSON object accidentally placed inside the learner-facing reply."""
+    if not isinstance(data, dict):
+        raise AIResponseFormatError("AI 返回结构不是对象。")
+    result = dict(data)
+    # Some model responses wrap the real coach payload as a JSON string in reply.
+    # Unwrap at most twice to tolerate accidental double encoding without looping.
+    for _ in range(2):
+        reply = result.get("reply")
+        if not isinstance(reply, str):
+            break
+        candidate = reply.strip()
+        if not candidate.startswith("{"):
+            break
+        try:
+            nested = json.loads(candidate)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(nested, dict) or not (
+            "output_mode" in nested or "agreement_stage" in nested
+            or "learning_path" in nested
+        ):
+            break
+        outer = {key: value for key, value in result.items() if key != "reply"}
+        outer.update(nested)
+        result = outer
+    return result
 
 
 def _has_provisional_assessment(plan):
@@ -468,7 +505,9 @@ learner's explicit "确认开始训练" before creating the formal task and acti
         history, user_message, conversation_state
     )
     try:
-        data = _call_ai_json(system_prompt, user_prompt, temperature=0.4)
+        data = _unwrap_nested_coach_payload(
+            _call_ai_json(system_prompt, user_prompt, temperature=0.4)
+        )
         if force_initial_draft and (
             data.get("output_mode") != "initial_draft"
             or not str(data.get("reply", "")).strip()
@@ -491,12 +530,13 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 "and four performance levels. Missing weekly hours may be stated as an adjustable "
                 "assumption; do not ask another discovery question first. Do not return conversation mode."
             )
-            data = _call_ai_json(
+            data = _unwrap_nested_coach_payload(_call_ai_json(
                 system_prompt + "\\n\\nMANDATORY REPAIR: For this request, output_mode MUST be initial_draft. "
-                "Do not return conversation mode.",
+                "Do not return conversation mode. The learner explicitly requested a learning plan; "
+                "do not ask another question.",
                 repair_prompt,
                 temperature=0.2,
-            )
+            ))
             if (
                 data.get("output_mode") != "initial_draft"
                 or not str(data.get("reply", "")).strip()
@@ -509,9 +549,10 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 )
     except AIResponseFormatError as exc:
         # Preserve readable conversation, but never create a proposal from unstructured text.
-        fallback_reply = exc.raw_content.strip() or (
-            "我暂时无法整理出规范的学习方案数据。我们可以先继续讨论你的目标，"
-            "我会在信息明确后重新整理方案。"
+        # Never expose raw provider output or JSON to learners.
+        fallback_reply = (
+            "刚才生成学习方案时出现了格式问题，内容没有正确显示。"
+            "请再发送一次“需要学习方案”，我会重新整理；无需重复提供之前的信息。"
         )
         return {
             "reply": fallback_reply,
