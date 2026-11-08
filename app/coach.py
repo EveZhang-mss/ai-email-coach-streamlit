@@ -457,6 +457,211 @@ The first task needs title, prompt, and a task-specific rubric with criteria tot
 Do not force identical criteria onto unrelated subjects. Make every criterion relevant to the learner's goal.
 """
 
+    messages = [
+        message for message in history[-12:]
+        if message.get("role") in {"user", "assistant"}
+    ]
+    conversation = "\n".join(
+        f'{message["role"]}: {message["content"]}' for message in messages
+    )
+    user_prompt = (
+        f"Persisted conversation state (authoritative facts and phase):\\n"
+        f"{json.dumps(conversation_state or {}, ensure_ascii=False)}\\n\\n"
+        f"Conversation history (use only for relevant context; do not repeat it):\\n"
+        f"{conversation}\\n\\nLatest learner message (respond to this first):\\n{user_message}"
+    )
+    force_initial_draft = _should_force_initial_draft(
+        history, user_message, conversation_state
+    )
+    try:
+        data = _unwrap_nested_coach_payload(
+            _call_ai_json(system_prompt, user_prompt, temperature=0.4)
+        )
+        if force_initial_draft and (
+            data.get("output_mode") != "initial_draft"
+            or not str(data.get("reply", "")).strip()
+            or str(data.get("reply", "")).strip() in {
+                "我们可以逐步讨论你的目标和适合你的训练方式。",
+                "我们继续讨论你的训练目标。",
+            }
+            or not isinstance(data.get("learning_path"), list)
+            or not data.get("learning_path")
+            or not _has_provisional_assessment(data.get("assessment_plan"))
+        ):
+            # One explicit repair attempt prevents a generic conversation reply
+            # from silently replacing a required provisional learning direction.
+            repair_prompt = (
+                user_prompt
+                + "\\n\\nSYSTEM CHECK: The learner has already supplied enough context for a provisional "
+                "learning direction. Your previous response did not satisfy this requirement. "
+                "Return output_mode=initial_draft NOW, with a learner-facing Chinese reply, a "
+                "non-empty staged learning_path, AND a provisional assessment_plan with weighted criteria "
+                "and four performance levels. Missing weekly hours may be stated as an adjustable "
+                "assumption; do not ask another discovery question first. Do not return conversation mode."
+            )
+            data = _unwrap_nested_coach_payload(_call_ai_json(
+                system_prompt + "\\n\\nMANDATORY REPAIR: For this request, output_mode MUST be initial_draft. "
+                "Do not return conversation mode. The learner explicitly requested a learning plan; "
+                "do not ask another question.",
+                repair_prompt,
+                temperature=0.2,
+            ))
+            if (
+                data.get("output_mode") != "initial_draft"
+                or not str(data.get("reply", "")).strip()
+                or not isinstance(data.get("learning_path"), list)
+                or not data.get("learning_path")
+                or not _has_provisional_assessment(data.get("assessment_plan"))
+            ):
+                # Explicit learner request must still produce a usable discussion draft.
+                # Use a clearly provisional, non-activating baseline rather than failing
+                # after repeated provider schema drift.
+                data = _build_safe_initial_draft(
+                    history, user_message, conversation_state, data
+                )
+    except AIResponseFormatError as exc:
+        # A formatting failure must never block an explicitly requested first draft.
+        # The fallback is clearly labelled as a provisional baseline, never a confirmed plan.
+        if force_initial_draft:
+            data = _build_safe_initial_draft(
+                history, user_message, conversation_state, partial={}
+            )
+            data["reply"] = (
+                "我先根据目前已提供的信息整理一份可讨论的初版方案。"
+                "由于本轮 AI 输出格式异常，以下内容先作为可调整的基础草案；"
+                "你不需要重新提供已经说过的信息。\n\n"
+                + data["reply"]
+            )
+        else:
+            raw_reply = str(exc.raw_content or "").strip()
+            # Plain language can be shown; JSON, code fences and provider payloads cannot.
+            fallback_reply = raw_reply if raw_reply and not raw_reply.startswith(("{", "```")) else (
+                "刚才生成回复时遇到格式问题，但之前的沟通记录已保留。"
+                "你可以继续提出问题，或发送“需要学习方案”让我整理初版方案。"
+            )
+            return {
+                "reply": fallback_reply,
+                "ready": False,
+                "output_mode": "conversation",
+                "agreement_stage": (conversation_state or {}).get("phase", "goal_discovery"),
+                "goal_summary": user_message.strip(),
+                "learning_strategy": "",
+                "learning_path": [],
+                "assessment_plan": {},
+                "remediation_policy": {},
+                "assumptions": [],
+                "revision_summary": {"changes": [], "reason": ""},
+                "tasks": [],
+                "conversation_state": conversation_state or {},
+            }
+    except Exception:
+        # Provider timeouts/errors are isolated from workflow state. If the learner
+        # explicitly asked for a draft, return a labelled provisional baseline.
+        if not force_initial_draft:
+            return {
+                "reply": "AI 服务暂时没有成功返回内容，之前的沟通记录已保留。请稍后重试；无需重新介绍学习目标。",
+                "ready": False, "output_mode": "conversation",
+                "agreement_stage": (conversation_state or {}).get("phase", "goal_discovery"),
+                "tasks": [], "conversation_state": conversation_state or {},
+            }
+        data = _build_safe_initial_draft(history, user_message, conversation_state, partial={})
+        data["reply"] = (
+            "AI 服务本轮暂时不可用。为避免让沟通卡住，我先提供一份明确标记为临时讨论稿的基础方案；"
+            "恢复连接后可以再结合你的领域细化。\n\n" + data["reply"]
+        )
+    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
+        raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
+    data.setdefault("ready", False)
+    data.setdefault("agreement_stage", "goal_discovery")
+    data.setdefault("stage_progress", {"current_stage": data["agreement_stage"], "what_is_agreed": [], "still_to_discuss": [], "next_step": ""})
+    data.setdefault("goal_summary", user_message)
+    data.setdefault("learning_path", [])
+    data.setdefault("assessment_plan", {})
+    data.setdefault("learning_strategy", "")
+    data.setdefault("remediation_policy", {})
+    data.setdefault("assumptions", [])
+    data.setdefault("revision_summary", {"changes": [], "reason": ""})
+    data.setdefault("tasks", [])
+    data.setdefault("output_mode", "conversation")
+    state = data.get("conversation_state")
+    if not isinstance(state, dict):
+        state = {}
+    data["conversation_state"] = state
+    data["conversation_state"].setdefault("phase", data.get("agreement_stage", "goal_discovery"))
+    data["conversation_state"].setdefault("phase_round", 0)
+    data["conversation_state"].setdefault("learner_profile", {})
+    data["conversation_state"].setdefault("agreed_points", [])
+    data["conversation_state"].setdefault("pending_questions", [])
+    data["conversation_state"].setdefault("last_discussed_topic", "")
+    data["conversation_state"].setdefault("next_step", "")
+
+    if data["ready"]:
+        if data.get("output_mode") != "final_proposal":
+            raise ValueError("只有 final_proposal 输出模式可以提交正式训练提议。")
+        if data.get("agreement_stage") != "final_proposal":
+            raise ValueError("只有最终方案阶段可以提交正式训练提议。")
+        learning_path = data.get("learning_path")
+        assessment_plan = data.get("assessment_plan")
+        tasks = data.get("tasks")
+        if not isinstance(learning_path, list) or not learning_path:
+            raise ValueError("正式训练提议必须包含分阶段学习路径。")
+        for index, stage in enumerate(learning_path, start=1):
+            if not isinstance(stage, dict):
+                raise ValueError(f"第 {index} 阶段格式不正确。")
+            required = ("stage", "title", "objective", "topics", "prerequisites",
+                        "rationale", "activities", "learning_outcomes",
+                        "completion_evidence", "duration_range")
+            if any(key not in stage for key in required):
+                raise ValueError(f"第 {index} 阶段缺少必要的教学设计字段。")
+            if (not isinstance(stage["stage"], int) or isinstance(stage["stage"], bool)
+                    or stage["stage"] < 1
+                    or any(not isinstance(stage[key], str) or not stage[key].strip()
+                           for key in ("title", "objective", "rationale"))
+                    or any(not isinstance(stage[key], list) for key in
+                           ("topics", "prerequisites", "activities",
+                            "learning_outcomes", "completion_evidence"))):
+                raise ValueError(f"第 {index} 阶段的字段类型或内容不正确。")
+            duration = stage["duration_range"]
+            if not isinstance(duration, dict):
+                raise ValueError(f"第 {index} 阶段的时间范围格式不正确。")
+            minimum, maximum = duration.get("min_weeks"), duration.get("max_weeks")
+            hours = duration.get("estimated_hours")
+            if (not isinstance(minimum, int) or isinstance(minimum, bool)
+                    or not isinstance(maximum, int) or isinstance(maximum, bool)
+                    or minimum < 1 or maximum < minimum
+                    or not isinstance(hours, (int, float)) or isinstance(hours, bool)
+                    or hours <= 0):
+                raise ValueError(f"第 {index} 阶段的预计时间范围不合理。")
+        if not _has_provisional_assessment(assessment_plan):
+            raise ValueError("正式方案必须包含评分维度、合计 100 分的权重和通过标准。")
+        # Optional advanced rubric detail is retained when supplied, but it is not
+        # required for the MVP to move from proposal to confirmation.
+        assessment_plan.setdefault("explanation", "根据学习目标、阶段成果和实际作业综合评价。")
+        assessment_plan.setdefault("stage_completion_rules", ["提交阶段成果并能说明主要思路。"])
+        assessment_plan.setdefault("assessment_policy", {"evidence_based": True})
+        data["assessment_plan"] = assessment_plan
+        if not isinstance(data.get("remediation_policy"), dict):
+            data["remediation_policy"] = {
+                "principle": "发现明显差距时先提供针对性补强建议；重大路径调整须经学员确认。"
+            }
+        if not isinstance(data.get("assumptions"), list):
+            raise ValueError("assumptions 必须是数组。")
+        if not isinstance(data.get("revision_summary"), dict):
+            raise ValueError("revision_summary 格式不正确。")
+        if not isinstance(tasks, list) or len(tasks) != 1:
+            raise ValueError("正式训练提议必须包含且只包含一项首个任务。")
+        data["tasks"][0] = _validate_task(tasks[0])
+    else:
+        data["tasks"] = []
+        if data.get("output_mode") == "initial_draft":
+            provisional = data.get("assessment_plan")
+            if not _has_provisional_assessment(provisional):
+                raise ValueError("初版方案必须包含评分维度、合计 100 分的权重和通过标准。")
+            provisional.setdefault("explanation", "根据阶段成果和实际作业判断是否掌握。")
+            provisional.setdefault("stage_completion_rules", ["提交阶段成果并能说明主要思路。"])
+            provisional.setdefault("assessment_policy", {"provisional": True})
+    return data
+
 
 def generate_next_task(
     previous_assignment,
