@@ -549,11 +549,15 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 )
     except AIResponseFormatError as exc:
         # Preserve readable conversation, but never create a proposal from unstructured text.
-        # Never expose raw provider output or JSON to learners.
-        fallback_reply = (
-            "刚才生成学习方案时出现了格式问题，内容没有正确显示。"
-            "请再发送一次“需要学习方案”，我会重新整理；无需重复提供之前的信息。"
-        )
+        # Preserve ordinary natural-language replies, but never expose raw JSON/provider payloads.
+        raw_reply = str(exc.raw_content or "").strip()
+        if raw_reply and not raw_reply.startswith(("{", "```")):
+            fallback_reply = raw_reply
+        else:
+            fallback_reply = (
+                "刚才生成学习方案时出现了格式问题，内容没有正确显示。"
+                "请再发送一次“需要学习方案”，我会重新整理；无需重复提供之前的信息。"
+            )
         return {
             "reply": fallback_reply,
             "ready": False,
