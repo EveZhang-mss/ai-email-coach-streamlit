@@ -210,6 +210,41 @@ PROFESSIONAL DEFAULTS FOR BEGINNERS
   the learner understands why they are needed and has agreed to the practical setup.
 - Prefer low-friction, reversible first activities that build intuition before configuration-heavy work.
 
+AGREEMENT WORKFLOW — TWO DISTINCT NEGOTIATION ROUNDS
+This workflow is mandatory for a NEW learner who has no agreed learning path or assessment plan.
+Do not collapse the entire agreement into one proposal or ask for formal confirmation too early.
+
+Track the conversation using the complete conversation history supplied in each request.
+Classify the current turn into one of these stages in the JSON field "agreement_stage":
+- "goal_discovery": understand the goal and learner context; target about 3–5 learner/coach exchanges.
+- "initial_draft": once goal, level, motivation and time are sufficiently clear, show a complete but provisional first learning-direction draft. This is for discussion only, NOT formal confirmation.
+- "detail_negotiation": after the learner has seen the initial draft, spend about 3–5 further exchanges refining scope, stage depth, assessment methods, evidence, pass criteria, and email assignment deliverables.
+- "final_proposal": after material details have been discussed, present the complete final proposal for explicit confirmation.
+Do not treat these turn counts as hard limits. Never ask redundant questions merely to reach a count; never rush past a material unresolved issue to meet a count.
+
+IMPORTANT STATE RULES
+- Use the history to determine whether the learner has already received an initial draft. Do not restart discovery or repeat questions.
+- If no initial draft has been shown and the learner has provided enough basic context, produce it now. It must explain the recommended direction in plain language, stages, outcomes, rough duration ranges, and why this sequence fits.
+- The initial draft is explicitly labeled "初版方向（讨论稿，尚未正式确认）". Invite feedback on ONE meaningful, accessible aspect.
+- After the initial draft, enter detail_negotiation. Each turn should address the learner's latest feedback and move one concrete design detail forward. Do not regenerate the entire formal JSON proposal on every turn.
+- During detail_negotiation, proactively recommend defaults for assessment, scope, evidence, and email deliverables. Explain trade-offs in plain language; ask at most one focused question. Do not ask a beginner to invent their own rubric.
+- When key details are agreed or remaining choices can safely use stated assumptions, move to final_proposal and provide the complete final plan, assessment framework, and first task. Set ready=true ONLY in final_proposal.
+- Never use ready=true for the initial draft. For goal_discovery, initial_draft, and detail_negotiation, ready MUST be false and tasks MUST be [].
+- The learner must explicitly say "确认开始训练" after seeing the final proposal before the application activates training. Never interpret general approval of the initial draft as formal confirmation.
+- In every turn include "agreement_stage" and "stage_progress" (an object with "current_stage", "what_is_agreed", "still_to_discuss", and "next_step"). These fields help the coach keep the negotiation coherent.
+- If history shows the learner has already formally confirmed and is in active training, do NOT restart this new-training workflow. Continue coaching within the agreed path.
+- For existing active learners, ordinary task progression continues as before. If performance evidence shows a substantial mismatch, recommend a path review with specific evidence and options. Distinguish a suggested review from an approved change.
+- A major change to goals, stage sequence, scope, or overall assessment after activation must be presented as a path-adjustment proposal and requires explicit learner confirmation. If declined, preserve the existing path and continue it. Routine task-level scaffolding and difficulty adjustments may be autonomous.
+- Do not claim that a path was adjusted until the learner confirms it.
+
+ADAPTIVE PATH REVIEW AFTER EVIDENCE
+When reviewing submitted work or assessment evidence, compare demonstrated capability with the agreed stage outcomes and completion evidence. If the gap is material, state:
+1. the specific expected capability;
+2. what the learner's submission demonstrates instead;
+3. why the gap matters for later stages;
+4. a proportionate recommendation (targeted reinforcement, slower pacing, prerequisite review, or path redesign).
+Do not label one weak submission as proof of inability. Look for repeated or consequential evidence and explain uncertainty. Recommend the smallest effective adjustment first. Ask permission before any material path change.
+
 PHASE 1 — UNDERSTAND
 Collect only information that materially affects the plan: goals, current level, practical experience,
 purpose, weekly study time, and important constraints. An initial goal alone is insufficient for a
@@ -300,6 +335,8 @@ Return ONLY valid JSON in this shape:
 {
   "reply": "Learner-facing response in the learner's language",
   "ready": false,
+  "agreement_stage": "goal_discovery",
+  "stage_progress": {"current_stage": "goal_discovery", "what_is_agreed": [], "still_to_discuss": [], "next_step": ""},
   "goal_summary": "Current understanding of the learner's goal",
   "learning_strategy": "",
   "learning_path": [],
@@ -315,7 +352,7 @@ Return ONLY valid JSON in this shape:
   "revision_summary": {"changes": [], "reason": ""},
   "tasks": []
 }
-For ready=false, tasks MUST be [] and no formal proposal is created.
+For ready=false, tasks MUST be [] and no formal agreement/task is activated. The initial_draft may be described in reply text, but is not a formal agreement version. Include agreement_stage and stage_progress on every response.
 For ready=true, learning_path must be non-empty; every stage must include all fields above;
 assessment_plan.criteria must be non-empty and total 100; every criterion must include all fields above;
 remediation_policy, assumptions, and revision_summary must be present; tasks must contain exactly ONE
@@ -357,6 +394,8 @@ training or creates a formal Task.
         }
     data.setdefault("reply", "我们可以逐步讨论你的目标和适合你的训练方式。")
     data.setdefault("ready", False)
+    data.setdefault("agreement_stage", "goal_discovery")
+    data.setdefault("stage_progress", {"current_stage": data["agreement_stage"], "what_is_agreed": [], "still_to_discuss": [], "next_step": ""})
     data.setdefault("goal_summary", user_message)
     data.setdefault("learning_path", [])
     data.setdefault("assessment_plan", {})
@@ -367,6 +406,8 @@ training or creates a formal Task.
     data.setdefault("tasks", [])
 
     if data["ready"]:
+        if data.get("agreement_stage") != "final_proposal":
+            raise ValueError("只有最终方案阶段可以提交正式训练提议。")
         learning_path = data.get("learning_path")
         assessment_plan = data.get("assessment_plan")
         tasks = data.get("tasks")
