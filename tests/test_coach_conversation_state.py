@@ -182,6 +182,46 @@ def test_nested_json_inside_reply_is_unwrapped_before_display():
     assert result["learning_path"][0]["title"] == "基础阶段"
 
 
+
+def test_explicit_plan_request_uses_safe_draft_if_ai_schema_fails(monkeypatch):
+    calls = []
+
+    def fake_call(system_prompt, user_prompt, **kwargs):
+        calls.append(user_prompt)
+        return {
+            "output_mode": "conversation",
+            "reply": "我还需要了解更多信息。",
+            "ready": False,
+            "agreement_stage": "detail_negotiation",
+            "learning_path": [],
+            "assessment_plan": {},
+            "tasks": [],
+        }
+
+    monkeypatch.setattr(coach, "_call_ai_json", fake_call)
+    result = coach.coach_message(
+        [{"role": "user", "content": "我想学习计算机基础，培养工程师思维。"}],
+        "需要学习方案",
+        "真实 AI",
+        conversation_state={
+            "phase": "detail_negotiation",
+            "phase_round": 4,
+            "learner_profile": {"level": "beginner"},
+            "current_draft": {},
+        },
+    )
+
+    assert len(calls) == 2
+    assert result["output_mode"] == "initial_draft"
+    assert result["ready"] is False
+    assert len(result["learning_path"]) >= 3
+    assert sum(item["points"] for item in result["assessment_plan"]["criteria"]) == 100
+    assert result["conversation_state"]["phase"] == "initial_draft"
+    assert result["tasks"] == []
+    assert "初版方案" in result["reply"]
+
+
+
 def test_explicit_need_learning_plan_forces_initial_draft():
     assert coach._should_force_initial_draft(
         [{"role": "user", "content": "我想学习计算机基础。"}],
