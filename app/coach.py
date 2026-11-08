@@ -65,6 +65,17 @@ def _call_ai_json(system_prompt, user_prompt, temperature=0.3):
     return _parse_json_object(content)
 
 
+def _normalize_learner_reply(value):
+    """Render escaped newline sequences from model JSON as real line breaks."""
+    if not isinstance(value, str):
+        return value
+    return (
+        value.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+    )
+
+
 def _mock_rubric():
     # 仅供离线演示；真实 AI 模式下不得使用这套示例维度。
     return {
@@ -145,7 +156,7 @@ def _should_force_initial_draft(history, user_message, conversation_state):
         return False
     if state.get("phase") == "active_learning":
         return False
-    text = "\\n".join(
+    text = "\n".join(
         str(item.get("content", "")) for item in history
         if isinstance(item, dict) and item.get("role") in {"user", "assistant"}
     ) + "\\n" + str(user_message or "")
@@ -437,6 +448,9 @@ recommendations; do not make beginners choose unfamiliar tools or assessment met
 
 NATURAL, NON-REPETITIVE COACHING
 - Reply to the learner's latest message first. Do not repeat facts or questions already answered.
+- The persisted current_draft and learner_profile are authoritative. Once a draft exists, NEVER restart goal/level discovery or ask what programming experience the learner has already stated.
+- Treat a new weekly-hours message as an update to the existing draft, not as a new learning goal. Preserve the original goal and level.
+- If the learner says the other parts are suitable (for example “其他的都合适”), incorporate the new constraint and move forward to the final proposal; do not ask the first discovery question again.
 - Ask at most ONE simple, high-value question per turn. Never ask a beginner a technical self-assessment.
 - No fixed word count or paragraph count. No default quiz or 10-minute challenge.
 - If information is missing but not essential, make a conservative adjustable assumption and continue.
@@ -512,10 +526,10 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
         f'{message["role"]}: {message["content"]}' for message in messages
     )
     user_prompt = (
-        f"Persisted conversation state (authoritative facts and phase):\\n"
-        f"{json.dumps(conversation_state or {}, ensure_ascii=False)}\\n\\n"
-        f"Conversation history (use only for relevant context; do not repeat it):\\n"
-        f"{conversation}\\n\\nLatest learner message (respond to this first):\\n{user_message}"
+        f"Persisted conversation state (authoritative facts and phase):\n"
+        f"{json.dumps(conversation_state or {}, ensure_ascii=False)}\n\n"
+        f"Conversation history (authoritative; preserve all previously stated facts):\n"
+        f"{conversation}\n\nLatest learner message (respond to this first):\n{user_message}"
     )
     force_initial_draft = _should_force_initial_draft(
         history, user_message, conversation_state
@@ -620,6 +634,8 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
     # Providers occasionally return the learner-facing text under a different key,
     # or omit it while still returning a syntactically valid JSON object. Never let
     # that provider-format issue crash the learner conversation.
+    if isinstance(data.get("reply"), str):
+        data["reply"] = _normalize_learner_reply(data["reply"])
     if not isinstance(data.get("reply"), str) or not data["reply"].strip():
         for alias in ("response", "message", "answer", "content"):
             candidate = data.get(alias)
