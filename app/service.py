@@ -388,6 +388,7 @@ def send_student_message(tid, message, mode):
                 "goal_summary": reply.get("goal_summary", training.goal),
                 "learning_strategy": reply.get("learning_strategy", ""),
                 "learning_path": reply.get("learning_path", []),
+                "assessment_plan": reply.get("assessment_plan", {}),
                 "assumptions": reply.get("assumptions", []),
             }
         state_row.state_json = json.dumps(conversation_state, ensure_ascii=False)
