@@ -3,7 +3,7 @@ import json
 from sqlalchemy import select
 
 from app.db import get_session
-from app.models import CoachConversationState, EmailMessage, Student, Training
+from app.models import CoachConversationState, EmailMessage, Student, Training, TrainingAgreement, Task
 import app.service as service
 from app import coach
 
@@ -562,3 +562,91 @@ def test_affirmative_after_draft_continues_negotiation_without_restarting_discov
         assert saved["learner_profile"]["level"] == "写过简单代码，有少量编程经验的初学者"
         assert saved["current_draft"]["learning_path"][0]["title"] == "计算机基础"
         assert any("邮件作业" in item for item in saved["agreed_points"])
+
+
+def test_explicit_final_plan_request_creates_pending_proposal_and_first_task(isolated_db, monkeypatch):
+    def should_not_call_ai(*args, **kwargs):
+        raise AssertionError("Final-plan MVP path must not depend on another AI turn")
+
+    monkeypatch.setattr(service, "coach_message", should_not_call_ai)
+    with get_session() as db:
+        student = Student(name="MVP learner", email="mvp-finalize@example.com")
+        db.add(student)
+        db.flush()
+        training = Training(
+            student_id=student.id,
+            goal="学习计算机基础知识，培养工程师思维",
+            status="planning",
+        )
+        db.add(training)
+        db.flush()
+        db.add(EmailMessage(
+            training_id=training.id, sender="学员", subject="训练沟通",
+            body="我想学计算机基础知识，培养工程师思维。每周5小时。",
+        ))
+        db.add(CoachConversationState(
+            training_id=training.id,
+            state_json=json.dumps({
+                "phase": "detail_negotiation",
+                "phase_round": 4,
+                "learner_profile": {
+                    "goal": "学习计算机基础知识，培养工程师思维",
+                    "level": "写过简单代码，有少量编程经验的初学者",
+                    "weekly_hours": 5,
+                },
+                "agreed_points": ["初版学习路径符合预期", "每周投入5小时"],
+                "pending_questions": [],
+                "current_draft": {
+                    "goal_summary": "学习计算机基础知识，培养工程师思维",
+                    "learning_strategy": "先理解原理，再动手实践",
+                    "learning_path": [{
+                        "stage": 1,
+                        "title": "建立基础认知",
+                        "objective": "理解计算机基本组成",
+                        "duration_range": {"min_weeks": 2, "max_weeks": 3, "estimated_hours": 15},
+                    }],
+                    "assessment_plan": {
+                        "criteria": [
+                            {"name": "核心理解", "description": "解释核心概念", "points": 30},
+                            {"name": "实践应用", "description": "完成实践", "points": 35},
+                            {"name": "问题解决", "description": "分析问题", "points": 25},
+                            {"name": "表达复盘", "description": "说明过程", "points": 10},
+                        ],
+                        "pass_threshold": 70,
+                    },
+                    "assumptions": ["每周投入 5 小时"],
+                },
+            }, ensure_ascii=False),
+        ))
+        db.commit()
+        training_id = training.id
+
+    response = service.send_student_message(
+        training_id,
+        "现在请直接进入最终学习方案整理阶段。每周5小时。输出完整方案后等待我回复确认开始训练。",
+        "真实 AI",
+    )
+    assert "确认开始训练" in response
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        agreement = db.scalar(
+            select(TrainingAgreement).where(TrainingAgreement.training_id == training_id)
+        )
+        state = db.scalar(
+            select(CoachConversationState).where(CoachConversationState.training_id == training_id)
+        )
+        saved = json.loads(state.state_json)
+        assert training.status == "awaiting_confirmation"
+        assert training.tasks == []
+        assert agreement.status == "pending"
+        assert saved["phase"] == "final_proposal"
+        proposal = json.loads(agreement.proposal_json)
+        assert proposal["task"]["title"] == "第一项任务：认识计算机系统的基本组成"
+
+    confirmation = service.send_student_message(training_id, "确认开始训练", "真实 AI")
+    assert "第一项任务" in confirmation
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        assert training.status == "active"
+        assert len(training.tasks) == 1
+        assert training.tasks[0].status == "assigned"
