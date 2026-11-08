@@ -20,10 +20,10 @@ def _parse_json_object(content):
 
     candidate = content.strip()
     if candidate.startswith("```"):
-        candidate = candidate.split("\\n", 1)[-1]
+        candidate = candidate.split("\n", 1)[-1]
         if candidate.rstrip().endswith("```"):
             candidate = candidate.rstrip()[:-3].strip()
-        if candidate.lower().startswith("json\\n"):
+        if candidate.lower().startswith("json\n"):
             candidate = candidate[5:].strip()
 
     try:
