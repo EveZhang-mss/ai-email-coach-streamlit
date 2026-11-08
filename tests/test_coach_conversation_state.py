@@ -99,6 +99,63 @@ def test_coach_prompt_uses_natural_non_repetitive_conversation(monkeypatch):
     assert result["conversation_state"]["phase"] == "goal_discovery"
 
 
+
+def test_sufficient_goal_and_experience_force_initial_draft_retry(monkeypatch):
+    calls = []
+
+    def fake_call(system_prompt, user_prompt, **kwargs):
+        calls.append((system_prompt, user_prompt))
+        if len(calls) == 1:
+            return {
+                "output_mode": "conversation",
+                "reply": "我们可以逐步讨论你的目标和适合你的训练方式。",
+                "ready": False,
+                "agreement_stage": "goal_discovery",
+                "conversation_state": {"phase": "goal_discovery"},
+                "tasks": [],
+            }
+        return {
+            "output_mode": "initial_draft",
+            "reply": "根据你的目标和已有接触，我建议先从编程基础开始，再逐步完成独立小项目。",
+            "ready": False,
+            "agreement_stage": "initial_draft",
+            "learning_path": [{"stage": 1, "title": "编程基础"}],
+            "assumptions": ["每周投入时间暂按可调整安排处理"],
+            "conversation_state": {"phase": "initial_draft"},
+            "tasks": [],
+        }
+
+    monkeypatch.setattr(coach, "_call_ai_json", fake_call)
+    result = coach.coach_message(
+        [
+            {"role": "user", "content": "我想学习计算机相关的基础知识。"},
+            {"role": "assistant", "content": "先了解你的学习情况。"},
+        ],
+        "我照着教程敲过代码，但基本忘了，也想培养自己开发程序的能力。",
+        "真实 AI",
+        conversation_state={"phase": "goal_discovery", "phase_round": 1},
+    )
+
+    assert len(calls) == 2
+    assert "MANDATORY REPAIR" in calls[1][0]
+    assert result["output_mode"] == "initial_draft"
+    assert result["agreement_stage"] == "initial_draft"
+    assert result["learning_path"]
+    assert result["ready"] is False
+
+
+def test_initial_draft_trigger_recognizes_beginner_experience():
+    assert coach._should_force_initial_draft(
+        [{"role": "user", "content": "我想学习计算机相关的基础知识。"}],
+        "我照着教程敲过代码，但基本忘了。",
+        {"phase": "goal_discovery"},
+    )
+    assert not coach._should_force_initial_draft(
+        [{"role": "user", "content": "我想学习计算机相关的基础知识。"}],
+        "我照着教程敲过代码，但基本忘了。",
+        {"phase": "detail_negotiation"},
+    )
+
 def test_conversation_mode_never_creates_formal_tasks(monkeypatch):
     monkeypatch.setattr(
         coach,
