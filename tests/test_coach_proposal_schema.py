@@ -77,12 +77,15 @@ def test_ready_coach_proposal_accepts_complete_design(monkeypatch):
     assert result["remediation_policy"]["principle"]
 
 
-def test_ready_coach_proposal_rejects_incomplete_performance_levels(monkeypatch):
+def test_ready_coach_proposal_accepts_simple_mvp_assessment_without_four_levels(monkeypatch):
     proposal = _valid_proposal()
-    proposal["assessment_plan"]["criteria"][0]["performance_levels"].pop("beginning")
+    proposal["assessment_plan"]["criteria"][0].pop("performance_levels")
+    proposal["assessment_plan"]["criteria"][0].pop("evidence")
     monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
-    with pytest.raises(ValueError, match="四档具体表现描述"):
-        coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+    result = coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+    assert result["ready"] is True
+    assert result["assessment_plan"]["criteria"][0]["points"] == 100
+    assert result["assessment_plan"]["pass_threshold"] == 80
 
 
 def test_ready_coach_proposal_rejects_invalid_duration_range(monkeypatch):
