@@ -434,7 +434,7 @@ def send_student_message(tid, message, mode):
                 history, message, conversation_state, partial=saved_plan
             )
             task = _mock_task(reply.get("goal_summary") or training.goal or "计算机基础学习")["tasks"][0]
-            task["title"] = "第一项任务：认识计算机系统的基本组成"
+            task["title"] = "解释计算机如何运行"
             task["prompt"] = (
                 "请完成第一封学习邮件作业。\n\n"
                 "1. 用自己的话说明计算机由哪些主要部分组成，以及它们如何协作。\n"
