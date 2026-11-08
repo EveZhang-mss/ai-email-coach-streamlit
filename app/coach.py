@@ -5,8 +5,50 @@ from app.config import settings
 from app.ai_client import get_ai_client, get_ai_model
 
 
+class AIResponseFormatError(ValueError):
+    """Raised when the model returns content that cannot be read as a JSON object."""
+
+    def __init__(self, message, raw_content=""):
+        super().__init__(message)
+        self.raw_content = raw_content
+
+
+def _parse_json_object(content):
+    """Parse a JSON object, tolerating code fences or short text around the object."""
+    if not isinstance(content, str) or not content.strip():
+        raise AIResponseFormatError("AI 没有返回内容，请稍后重试。", content or "")
+
+    candidate = content.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.split("\\n", 1)[-1]
+        if candidate.rstrip().endswith("```"):
+            candidate = candidate.rstrip()[:-3].strip()
+        if candidate.lower().startswith("json\\n"):
+            candidate = candidate[5:].strip()
+
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(candidate):
+        if character != "{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(candidate[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    raise AIResponseFormatError("AI 返回内容不是可识别的 JSON 对象。", content)
+
+
 def _call_ai_json(system_prompt, user_prompt, temperature=0.3):
-    """统一调用当前配置的 AI 服务商，并解析 JSON。"""
+    """统一调用当前配置的 AI 服务商，并解析 JSON 对象。"""
     client = get_ai_client()
     model = get_ai_model()
     response = client.chat.completions.create(
@@ -20,12 +62,7 @@ def _call_ai_json(system_prompt, user_prompt, temperature=0.3):
         max_tokens=4000,
     )
     content = response.choices[0].message.content
-    if not content:
-        raise ValueError("AI 没有返回内容，请稍后重试。")
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise ValueError("AI 返回的数据格式不正确，请重试。") from exc
+    return _parse_json_object(content)
 
 
 def _mock_rubric():
@@ -257,11 +294,30 @@ training or creates a formal Task.
     conversation = "\n".join(
         f'{message["role"]}: {message["content"]}' for message in messages
     )
-    data = _call_ai_json(
-        system_prompt,
-        f"Conversation history:\n{conversation}\n\nLatest learner message:\n{user_message}",
-        temperature=0.4,
-    )
+    try:
+        data = _call_ai_json(
+            system_prompt,
+            f"Conversation history:\\n{conversation}\\n\\nLatest learner message:\\n{user_message}",
+            temperature=0.4,
+        )
+    except AIResponseFormatError as exc:
+        # Preserve readable conversation, but never create a proposal from unstructured text.
+        fallback_reply = exc.raw_content.strip() or (
+            "我暂时无法整理出规范的学习方案数据。我们可以先继续讨论你的目标，"
+            "我会在信息明确后重新整理方案。"
+        )
+        return {
+            "reply": fallback_reply,
+            "ready": False,
+            "goal_summary": user_message.strip(),
+            "learning_strategy": "",
+            "learning_path": [],
+            "assessment_plan": {},
+            "remediation_policy": {},
+            "assumptions": [],
+            "revision_summary": {"changes": [], "reason": ""},
+            "tasks": [],
+        }
     data.setdefault("reply", "我们可以逐步讨论你的目标和适合你的训练方式。")
     data.setdefault("ready", False)
     data.setdefault("goal_summary", user_message)
