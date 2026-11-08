@@ -346,3 +346,60 @@ def test_initial_draft_is_saved_as_conversation_state_not_activated(isolated_db,
         assert saved["phase"] == "initial_draft"
         assert saved["current_draft"]["learning_path"][0]["title"] == "认识计算机如何运行"
         assert saved["current_draft"]["assessment_plan"]["criteria"][0]["name"] == "理解与应用"
+
+
+
+def test_valid_json_without_reply_does_not_crash_first_goal_message(monkeypatch):
+    monkeypatch.setattr(
+        coach,
+        "_call_ai_json",
+        lambda *args, **kwargs: {
+            "output_mode": "conversation",
+            "agreement_stage": "goal_discovery",
+            "ready": False,
+            "tasks": [],
+        },
+    )
+
+    result = coach.coach_message(
+        [],
+        "我想学计算机基础，培养工程师思维。",
+        "真实 AI",
+        conversation_state={"phase": "goal_discovery", "learner_profile": {}},
+    )
+
+    assert result["output_mode"] == "conversation"
+    assert result["ready"] is False
+    assert result["tasks"] == []
+    assert result["reply"]
+    assert "完全没有接触过编程" in result["reply"]
+    assert "跟着写过一些代码" in result["reply"]
+
+
+def test_explicit_plan_with_missing_reply_uses_safe_draft(monkeypatch):
+    monkeypatch.setattr(
+        coach,
+        "_call_ai_json",
+        lambda *args, **kwargs: {
+            "output_mode": "initial_draft",
+            "agreement_stage": "initial_draft",
+            "ready": False,
+            "learning_path": [],
+            "assessment_plan": {},
+            "tasks": [],
+        },
+    )
+
+    result = coach.coach_message(
+        [{"role": "user", "content": "我想学计算机基础，培养工程师思维。"}],
+        "需要学习方案",
+        "真实 AI",
+        conversation_state={"phase": "goal_discovery", "current_draft": {}},
+    )
+
+    assert result["output_mode"] == "initial_draft"
+    assert result["ready"] is False
+    assert result["learning_path"]
+    assert result["assessment_plan"]["criteria"]
+    assert result["reply"]
+    assert result["tasks"] == []
