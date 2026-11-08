@@ -47,7 +47,8 @@ def test_conversation_state_persists_between_student_messages(monkeypatch, isola
     service.send_student_message(training_id, "我更喜欢理解原理。", "真实 AI")
 
     assert len(seen_states) == 2
-    assert seen_states[0] == {}
+    assert seen_states[0]["phase"] == "goal_discovery"
+    assert seen_states[0]["agreed_points"] == []
     assert seen_states[1]["learner_profile"]["level"] == "beginner"
     assert "每周约3小时" in seen_states[1]["agreed_points"]
 
