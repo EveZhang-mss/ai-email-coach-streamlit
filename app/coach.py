@@ -604,6 +604,40 @@ learner's explicit "确认开始训练" before creating the formal task and acti
         data["tasks"][0] = _validate_task(tasks[0])
     else:
         data["tasks"] = []
+        if data.get("output_mode") == "initial_draft":
+            provisional = data.get("assessment_plan")
+            if not isinstance(provisional, dict) or not isinstance(
+                provisional.get("criteria"), list
+            ) or not provisional["criteria"]:
+                raise ValueError("初版学习方案必须同时包含初步评分依据。")
+            criteria = provisional["criteria"]
+            if any(not isinstance(item, dict) for item in criteria):
+                raise ValueError("初版评分维度格式不正确。")
+            weights = [item.get("points") for item in criteria]
+            if any(not isinstance(points, int) or isinstance(points, bool) or points <= 0
+                   for points in weights) or sum(weights) != 100:
+                raise ValueError("初版评分维度权重必须为正整数，且合计 100。")
+            for item in criteria:
+                if any(not isinstance(item.get(key), str) or not item[key].strip()
+                       for key in ("name", "description")):
+                    raise ValueError("初版评分维度必须说明名称和评价内容。")
+                levels = item.get("performance_levels")
+                if not isinstance(levels, dict) or any(
+                    not isinstance(levels.get(level), str) or not levels[level].strip()
+                    for level in ("excellent", "proficient", "developing", "beginning")
+                ):
+                    raise ValueError("初版评分维度必须包含四档具体表现标准。")
+                if not isinstance(item.get("evidence"), list):
+                    raise ValueError("初版评分维度必须说明评价证据。")
+            threshold = provisional.get("pass_threshold")
+            if not isinstance(threshold, int) or isinstance(threshold, bool) or not 0 <= threshold <= 100:
+                raise ValueError("初版评分体系必须说明通过标准。")
+            if not isinstance(provisional.get("explanation"), str) or not provisional["explanation"].strip():
+                raise ValueError("初版评分体系必须解释评分依据。")
+            if not isinstance(provisional.get("stage_completion_rules"), list):
+                raise ValueError("初版评分体系必须说明阶段完成规则。")
+            if not isinstance(provisional.get("assessment_policy"), dict):
+                raise ValueError("初版评分体系必须包含评价原则。")
     return data
 
 
