@@ -554,14 +554,10 @@ all future task details prematurely.
 
 PHASE 4 — OVERALL ASSESSMENT DESIGN
 Design an overall assessment framework that measures the capabilities in the learning objectives.
-Do not force generic criteria onto unrelated subjects. Each criterion must include:
-- name, description, positive integer points (weight), performance_levels, evidence,
-  and minimum_score (integer or null).
-The sum of criterion points must equal exactly 100.
-performance_levels must describe observable, domain-specific performance at four levels:
-excellent, proficient, developing, beginning. Avoid vague labels without behavioral evidence.
-assessment_plan must also include pass_threshold (0–100), explanation, stage_completion_rules,
-and assessment_policy. Define essential minimums only when educationally justified.
+Do not force generic criteria onto unrelated subjects. For the MVP, each criterion must include only a clear name, short description, and positive
+integer points (weight); all weights must total exactly 100. Add a simple pass_threshold.
+Evidence and short stage-completion rules are useful. Four-level performance bands,
+minimum_score fields, and detailed assessment policies are optional and may be added later.
 Do not treat a single score as the only evidence of learning.
 
 SEPARATE OVERALL ASSESSMENT FROM TASK RUBRICS
@@ -814,7 +810,7 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                     or hours <= 0):
                 raise ValueError(f"第 {index} 阶段的预计时间范围不合理。")
         if not _has_provisional_assessment(assessment_plan):
-            raise ValueError("正式方案必须包含评分维度、合计 100 分的权重和通过标准。")
+            raise ValueError("正式方案评分维度必须使用正整数权重，且合计 100，并包含通过标准。")
         # Optional advanced rubric detail is retained when supplied, but it is not
         # required for the MVP to move from proposal to confirmation.
         assessment_plan.setdefault("explanation", "根据学习目标、阶段成果和实际作业综合评价。")
