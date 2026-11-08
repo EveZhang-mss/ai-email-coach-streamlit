@@ -120,3 +120,35 @@ def test_ready_false_never_returns_formal_tasks(monkeypatch):
     monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
     result = coach.coach_message([], "I want to learn computer systems.", "真实 AI")
     assert result["tasks"] == []
+
+
+def test_json_parser_accepts_fenced_json():
+    parsed = coach._parse_json_object('\\`\\`\\`json\\n{"reply": "你好", "ready": false}\\n\\`\\`\\`')
+    assert parsed == {"reply": "你好", "ready": False}
+
+
+def test_json_parser_accepts_json_with_surrounding_text():
+    parsed = coach._parse_json_object('结果如下：\\n{"reply": "可以继续讨论", "ready": false}\\n以上是回复。')
+    assert parsed["reply"] == "可以继续讨论"
+    assert parsed["ready"] is False
+
+
+def test_json_parser_rejects_unstructured_text_with_original_content():
+    raw = "我建议我们先从基础概念开始。"
+    with pytest.raises(coach.AIResponseFormatError) as error:
+        coach._parse_json_object(raw)
+    assert error.value.raw_content == raw
+
+
+def test_coach_message_preserves_unstructured_reply_without_creating_proposal(monkeypatch):
+    monkeypatch.setattr(
+        coach,
+        "_call_ai_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            coach.AIResponseFormatError("格式不正确", "我们先从生活中的例子开始。")
+        ),
+    )
+    result = coach.coach_message([], "我想从零开始学习计算机。", "真实 AI")
+    assert result["reply"] == "我们先从生活中的例子开始。"
+    assert result["ready"] is False
+    assert result["tasks"] == []
