@@ -164,7 +164,8 @@ def _should_force_initial_draft(history, user_message, conversation_state):
         "想学", "想培养", "学习", "希望掌握", "提升能力", "开发程序", "工程师思维"
     ))
     has_level_evidence = any(term in text for term in (
-        "零基础", "没有基础", "没学过", "从零开始", "没有编程基础", "教程", "敲过代码", "写过代码",
+        "零基础", "没有基础", "没学过", "从零开始", "没有编程基础", "教程",
+        "敲过代码", "写过代码", "写过简单的代码", "写过简单代码",
         "接触过编程", "学过编程", "基本上已经忘了", "有基础"
     ))
     return has_goal and has_level_evidence
