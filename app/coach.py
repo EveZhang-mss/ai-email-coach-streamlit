@@ -213,7 +213,17 @@ def _build_safe_initial_draft(history, user_message, conversation_state, partial
         "每周投入时间暂按可调整安排处理",
     )
     path = partial.get("learning_path")
-    if not isinstance(path, list) or not path:
+    if (
+        not isinstance(path, list) or not path
+        or any(
+            not isinstance(item, dict)
+            or not all(key in item for key in ("stage", "title", "objective", "duration_range"))
+            or not isinstance(item.get("duration_range"), dict)
+            or not isinstance(item["duration_range"].get("min_weeks"), int)
+            or not isinstance(item["duration_range"].get("max_weeks"), int)
+            for item in path
+        )
+    ):
         path = [
             {
                 "stage": 1, "title": "建立基础认知",
