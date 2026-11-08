@@ -644,7 +644,7 @@ def test_explicit_final_plan_request_creates_pending_proposal_and_first_task(iso
         assert proposal["task"]["title"] == "解释计算机如何运行"
 
     confirmation = service.send_student_message(training_id, "确认开始训练", "真实 AI")
-    assert "第一项任务" in confirmation
+    assert "解释计算机如何运行" in confirmation
     with get_session() as db:
         training = db.get(Training, training_id)
         assert training.status == "active"
