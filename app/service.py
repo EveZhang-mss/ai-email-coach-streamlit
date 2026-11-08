@@ -367,7 +367,15 @@ def send_student_message(tid, message, mode):
         previous_round = int(conversation_state.get("phase_round", 0) or 0)
         returned_state = reply.get("conversation_state")
         if isinstance(returned_state, dict):
-            conversation_state.update(returned_state)
+            for key, value in returned_state.items():
+                if key == "learner_profile" and isinstance(value, dict):
+                    merged_profile = dict(conversation_state.get("learner_profile") or {})
+                    merged_profile.update(value)
+                    conversation_state[key] = merged_profile
+                elif key in {"agreed_points", "pending_questions"} and isinstance(value, list):
+                    conversation_state[key] = value
+                elif value is not None:
+                    conversation_state[key] = value
         next_phase = reply.get("agreement_stage") or conversation_state.get("phase") or previous_phase
         conversation_state["phase"] = next_phase
         conversation_state["phase_round"] = (
