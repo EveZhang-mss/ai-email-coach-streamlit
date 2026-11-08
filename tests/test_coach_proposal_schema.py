@@ -7,6 +7,8 @@ def _valid_proposal():
     return {
         "reply": "这是完整的初步学习方案，请审阅。",
         "ready": True,
+        "agreement_stage": "final_proposal",
+        "stage_progress": {"current_stage": "final_proposal", "what_is_agreed": [], "still_to_discuss": [], "next_step": "确认"},
         "goal_summary": "Understand computer systems",
         "learning_strategy": "Build from program execution to system integration.",
         "learning_path": [{
@@ -152,3 +154,50 @@ def test_coach_message_preserves_unstructured_reply_without_creating_proposal(mo
     assert result["reply"] == "我们先从生活中的例子开始。"
     assert result["ready"] is False
     assert result["tasks"] == []
+
+
+def test_ready_proposal_is_rejected_outside_final_proposal_stage(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["agreement_stage"] = "initial_draft"
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    with pytest.raises(ValueError, match="只有最终方案阶段"):
+        coach.coach_message([], "I want to learn computer systems.", "真实 AI")
+
+
+def test_non_ready_proposal_never_creates_tasks_or_activates_path(monkeypatch):
+    proposal = _valid_proposal()
+    proposal["ready"] = False
+    proposal["agreement_stage"] = "detail_negotiation"
+    proposal["tasks"] = []
+    monkeypatch.setattr(coach, "_call_ai_json", lambda *args, **kwargs: proposal)
+    result = coach.coach_message([], "我希望调整考核方式。", "真实 AI")
+    assert result["agreement_stage"] == "detail_negotiation"
+    assert result["ready"] is False
+    assert result["tasks"] == []
+
+
+def test_prompt_defines_two_negotiation_stages_and_post_learning_path_review(monkeypatch):
+    captured = {}
+    def fake_call(system_prompt, user_prompt, **kwargs):
+        captured["system_prompt"] = system_prompt
+        return {
+            "reply": "我们继续讨论。",
+            "ready": False,
+            "agreement_stage": "goal_discovery",
+            "stage_progress": {
+                "current_stage": "goal_discovery",
+                "what_is_agreed": [],
+                "still_to_discuss": [],
+                "next_step": "了解实际目标",
+            },
+            "tasks": [],
+        }
+    monkeypatch.setattr(coach, "_call_ai_json", fake_call)
+    result = coach.coach_message([], "我想学习。", "真实 AI")
+    prompt = captured["system_prompt"]
+    assert "goal_discovery" in prompt
+    assert "initial_draft" in prompt
+    assert "detail_negotiation" in prompt
+    assert "final_proposal" in prompt
+    assert "ADAPTIVE PATH REVIEW AFTER EVIDENCE" in prompt
+    assert result["stage_progress"]["next_step"] == "了解实际目标"
