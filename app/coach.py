@@ -455,7 +455,16 @@ activities, learning_outcomes, completion_evidence, and duration_range
 The overall assessment needs criteria (name, description, points totaling 100) and pass_threshold.
 The first task needs title, prompt, and a task-specific rubric with criteria totaling 100 and pass_threshold.
 Do not force identical criteria onto unrelated subjects. Make every criterion relevant to the learner's goal.
-"""根据学员长期目标和最近表现，跨领域生成下一项训练任务。"""
+"""
+
+
+def generate_next_task(
+    previous_assignment,
+    previous_submission,
+    assessment,
+    training_goal="",
+):
+    """根据学员长期目标和最近表现，跨领域生成下一项训练任务。"""
     system_prompt = """
 You are an adaptive multidisciplinary learning curriculum designer.
 Create exactly ONE next task in the learner's actual training domain.
