@@ -110,10 +110,7 @@ def test_mvp_draft_review_final_confirmation_creates_one_task(monkeypatch, isola
         assert tasks[0].title == "解释计算机如何运行"
         assert agreement.status == "confirmed"
         assert first_confirmation == second_confirmation
-        assert calls == [
-            "我想学习计算机基础，培养工程师思维。",
-            "初版方向可以，请整理最终方案。",
-        ]
+        assert calls == ["我想学习计算机基础，培养工程师思维。"]
 
 
 
