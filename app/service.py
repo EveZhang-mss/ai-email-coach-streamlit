@@ -238,16 +238,31 @@ def _create_agreement(db, training, reply, proposal_type="initial_training"):
 
 
 def confirm_training_agreement(db, training, expected_type="initial_training"):
-    """Idempotently activate only the latest pending proposal of the expected type."""
+    """Activate the latest proposal once; repeated confirmation returns the same task."""
     agreement = _latest_agreement(db, training.id)
-    if not agreement or agreement.status != "pending":
+    if not agreement:
         raise ValueError("当前没有等待确认的提议。")
     proposal = json.loads(agreement.proposal_json)
     proposal_type = proposal.get("proposal_type", "initial_training")
     if proposal_type != expected_type:
-        raise ValueError("确认语句与当前等待确认的提议类型不匹配。")
+        raise ValueError("确认语句与当前提议类型不匹配。")
 
-    task_data = proposal["task"]
+    task_data = proposal.get("task") or {}
+    if agreement.status == "confirmed":
+        # Email retries or a learner repeating the command must never create a
+        # second copy of the first task.
+        existing = db.scalar(
+            select(Task).where(
+                Task.training_id == training.id,
+                Task.title == task_data.get("title", ""),
+                Task.prompt == task_data.get("prompt", ""),
+            ).order_by(Task.sequence_no.desc())
+        )
+        if existing:
+            return existing
+        raise ValueError("该方案已确认，但未找到对应任务，请联系管理员检查记录。")
+    if agreement.status != "pending":
+        raise ValueError("当前提议已处理，不能再次确认。")
     task = Task(
         sequence_no=max([x.sequence_no for x in training.tasks], default=0) + 1,
         title=task_data["title"],
