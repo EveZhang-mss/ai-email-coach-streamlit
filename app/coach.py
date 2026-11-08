@@ -128,6 +128,25 @@ def _validate_task(task):
     return task
 
 
+def _should_force_initial_draft(history, user_message, conversation_state):
+    """Detect a new learner who has shared a goal and enough level evidence to draft."""
+    state = conversation_state if isinstance(conversation_state, dict) else {}
+    if state.get("current_draft") or state.get("phase") not in (None, "", "goal_discovery"):
+        return False
+    text = "\\n".join(
+        str(item.get("content", "")) for item in history
+        if isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+    ) + "\\n" + str(user_message or "")
+    has_goal = any(term in text for term in (
+        "想学", "想培养", "学习", "希望掌握", "提升能力", "开发程序", "工程师思维"
+    ))
+    has_level_evidence = any(term in text for term in (
+        "零基础", "没有基础", "没学过", "教程", "敲过代码", "写过代码",
+        "接触过编程", "学过编程", "基本上已经忘了", "有基础"
+    ))
+    return has_goal and has_level_evidence
+
+
 def coach_message(history, user_message, mode="模拟 AI", conversation_state=None):
     """跨领域个人成长教练；ready 只表示可提出协议，不代表启动训练。"""
     if mode != "真实 AI":
@@ -391,17 +410,52 @@ learner's explicit "确认开始训练" before creating the formal task and acti
     conversation = "\n".join(
         f'{message["role"]}: {message["content"]}' for message in messages
     )
+    user_prompt = (
+        f"Persisted conversation state (authoritative facts and phase):\\n"
+        f"{json.dumps(conversation_state or {}, ensure_ascii=False)}\\n\\n"
+        f"Conversation history (use only for relevant context; do not repeat it):\\n"
+        f"{conversation}\\n\\nLatest learner message (respond to this first):\\n{user_message}"
+    )
+    force_initial_draft = _should_force_initial_draft(
+        history, user_message, conversation_state
+    )
     try:
-        data = _call_ai_json(
-            system_prompt,
-            (
-                f"Persisted conversation state (authoritative facts and phase):\\n"
-                f"{json.dumps(conversation_state or {}, ensure_ascii=False)}\\n\\n"
-                f"Conversation history (use only for relevant context; do not repeat it):\\n"
-                f"{conversation}\\n\\nLatest learner message (respond to this first):\\n{user_message}"
-            ),
-            temperature=0.4,
-        )
+        data = _call_ai_json(system_prompt, user_prompt, temperature=0.4)
+        if force_initial_draft and (
+            data.get("output_mode") != "initial_draft"
+            or not str(data.get("reply", "")).strip()
+            or str(data.get("reply", "")).strip() in {
+                "我们可以逐步讨论你的目标和适合你的训练方式。",
+                "我们继续讨论你的训练目标。",
+            }
+            or not isinstance(data.get("learning_path"), list)
+            or not data.get("learning_path")
+        ):
+            # One explicit repair attempt prevents a generic conversation reply
+            # from silently replacing a required provisional learning direction.
+            repair_prompt = (
+                user_prompt
+                + "\\n\\nSYSTEM CHECK: The learner has already supplied enough context for a provisional "
+                "learning direction. Your previous response did not satisfy this requirement. "
+                "Return output_mode=initial_draft NOW, with a learner-facing Chinese reply and a "
+                "non-empty staged learning_path. Missing weekly hours may be stated as an adjustable "
+                "assumption; do not ask another discovery question first. Do not return conversation mode."
+            )
+            data = _call_ai_json(
+                system_prompt + "\\n\\nMANDATORY REPAIR: For this request, output_mode MUST be initial_draft. "
+                "Do not return conversation mode.",
+                repair_prompt,
+                temperature=0.2,
+            )
+            if (
+                data.get("output_mode") != "initial_draft"
+                or not str(data.get("reply", "")).strip()
+                or not isinstance(data.get("learning_path"), list)
+                or not data.get("learning_path")
+            ):
+                raise ValueError(
+                    "AI 连续两次未能按要求生成初版学习方案；已阻止通用兜底回复。请检查 AI 服务日志后重试。"
+                )
     except AIResponseFormatError as exc:
         # Preserve readable conversation, but never create a proposal from unstructured text.
         fallback_reply = exc.raw_content.strip() or (
@@ -420,7 +474,7 @@ learner's explicit "确认开始训练" before creating the formal task and acti
             "revision_summary": {"changes": [], "reason": ""},
             "tasks": [],
         }
-    data.setdefault("reply", "我们可以逐步讨论你的目标和适合你的训练方式。")
+    if not isinstance(data.get("reply"), str) or not data["reply"].strip():\n        raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
     data.setdefault("ready", False)
     data.setdefault("agreement_stage", "goal_discovery")
     data.setdefault("stage_progress", {"current_stage": data["agreement_stage"], "what_is_agreed": [], "still_to_discuss": [], "next_step": ""})
