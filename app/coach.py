@@ -633,7 +633,7 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
                     or hours <= 0):
                 raise ValueError(f"第 {index} 阶段的预计时间范围不合理。")
         if not _has_provisional_assessment(assessment_plan):
-            raise ValueError("正式方案必须包含评分维度、合计 100 分的权重和通过标准。")
+            raise ValueError("正式方案评分维度必须使用正整数权重，且合计 100，并包含通过标准。")
         # Optional advanced rubric detail is retained when supplied, but it is not
         # required for the MVP to move from proposal to confirmation.
         assessment_plan.setdefault("explanation", "根据学习目标、阶段成果和实际作业综合评价。")
