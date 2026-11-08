@@ -112,3 +112,47 @@ def test_conversation_mode_never_creates_formal_tasks(monkeypatch):
     result = coach.coach_message([], "考核会怎么进行？", "真实 AI")
     assert result["ready"] is False
     assert result["tasks"] == []
+
+def test_initial_draft_is_saved_as_conversation_state_not_activated(isolated_db, monkeypatch):
+    def fake_coach(history, message, mode, conversation_state=None):
+        return {
+            "output_mode": "initial_draft",
+            "reply": "这是初版方向，供我们继续讨论。",
+            "ready": False,
+            "agreement_stage": "initial_draft",
+            "goal_summary": "从零开始理解计算机系统",
+            "learning_strategy": "先理解原理，再进行简单实践。",
+            "learning_path": [{"stage": 1, "title": "认识计算机如何运行"}],
+            "assumptions": ["暂按每周3小时安排"],
+            "tasks": [],
+            "conversation_state": {
+                "phase": "initial_draft",
+                "learner_profile": {"level": "beginner"},
+                "agreed_points": ["每周3小时"],
+            },
+        }
+
+    monkeypatch.setattr(service, "coach_message", fake_coach)
+    with get_session() as db:
+        student = Student(name="Draft learner", email="draft-state@example.com")
+        db.add(student)
+        db.flush()
+        training = Training(student_id=student.id, goal="", status="planning")
+        db.add(training)
+        db.commit()
+        training_id = training.id
+
+    service.send_student_message(training_id, "我想从零开始学习计算机系统。", "真实 AI")
+
+    with get_session() as db:
+        training = db.get(Training, training_id)
+        state = db.scalar(
+            select(CoachConversationState).where(
+                CoachConversationState.training_id == training_id
+            )
+        )
+        saved = json.loads(state.state_json)
+        assert training.status == "planning"
+        assert training.tasks == []
+        assert saved["phase"] == "initial_draft"
+        assert saved["current_draft"]["learning_path"][0]["title"] == "认识计算机如何运行"
