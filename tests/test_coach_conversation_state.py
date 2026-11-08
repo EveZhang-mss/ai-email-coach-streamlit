@@ -3,7 +3,7 @@ import json
 from sqlalchemy import select
 
 from app.db import get_session
-from app.models import CoachConversationState, Student, Training
+from app.models import CoachConversationState, EmailMessage, Student, Training
 import app.service as service
 from app import coach
 
