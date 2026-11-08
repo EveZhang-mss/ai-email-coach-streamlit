@@ -151,6 +151,44 @@ def _should_force_initial_draft(history, user_message, conversation_state):
     return has_goal and has_level_evidence
 
 
+def _has_provisional_assessment(plan):
+    if not isinstance(plan, dict):
+        return False
+    criteria = plan.get("criteria")
+    if not isinstance(criteria, list) or not criteria:
+        return False
+    weights = []
+    for item in criteria:
+        if not isinstance(item, dict):
+            return False
+        points = item.get("points")
+        if not isinstance(points, int) or isinstance(points, bool) or points <= 0:
+            return False
+        if not all(isinstance(item.get(key), str) and item[key].strip()
+                   for key in ("name", "description")):
+            return False
+        levels = item.get("performance_levels")
+        if not isinstance(levels, dict) or any(
+            not isinstance(levels.get(level), str) or not levels[level].strip()
+            for level in ("excellent", "proficient", "developing", "beginning")
+        ):
+            return False
+        if not isinstance(item.get("evidence"), list):
+            return False
+        weights.append(points)
+    threshold = plan.get("pass_threshold")
+    return (
+        sum(weights) == 100
+        and isinstance(threshold, int)
+        and not isinstance(threshold, bool)
+        and 0 <= threshold <= 100
+        and isinstance(plan.get("explanation"), str)
+        and bool(plan["explanation"].strip())
+        and isinstance(plan.get("stage_completion_rules"), list)
+        and isinstance(plan.get("assessment_policy"), dict)
+    )
+
+
 def coach_message(history, user_message, mode="模拟 AI", conversation_state=None):
     """跨领域个人成长教练；ready 只表示可提出协议，不代表启动训练。"""
     if mode != "真实 AI":
@@ -440,9 +478,7 @@ learner's explicit "确认开始训练" before creating the formal task and acti
             }
             or not isinstance(data.get("learning_path"), list)
             or not data.get("learning_path")
-            or not isinstance(data.get("assessment_plan"), dict)
-            or not isinstance(data["assessment_plan"].get("criteria"), list)
-            or not data["assessment_plan"].get("criteria")
+            or not _has_provisional_assessment(data.get("assessment_plan"))
         ):
             # One explicit repair attempt prevents a generic conversation reply
             # from silently replacing a required provisional learning direction.
@@ -466,9 +502,7 @@ learner's explicit "确认开始训练" before creating the formal task and acti
                 or not str(data.get("reply", "")).strip()
                 or not isinstance(data.get("learning_path"), list)
                 or not data.get("learning_path")
-                or not isinstance(data.get("assessment_plan"), dict)
-                or not isinstance(data["assessment_plan"].get("criteria"), list)
-                or not data["assessment_plan"].get("criteria")
+                or not _has_provisional_assessment(data.get("assessment_plan"))
             ):
                 raise ValueError(
                     "AI 连续两次未能按要求生成初版学习方案；已阻止通用兜底回复。请检查 AI 服务日志后重试。"
