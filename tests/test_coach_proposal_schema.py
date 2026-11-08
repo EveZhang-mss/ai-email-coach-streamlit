@@ -6,6 +6,7 @@ from app import coach
 def _valid_proposal():
     return {
         "reply": "这是完整的初步学习方案，请审阅。",
+        "output_mode": "final_proposal",
         "ready": True,
         "agreement_stage": "final_proposal",
         "stage_progress": {"current_stage": "final_proposal", "what_is_agreed": [], "still_to_discuss": [], "next_step": "确认"},
