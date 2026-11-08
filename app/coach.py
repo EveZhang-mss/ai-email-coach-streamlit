@@ -393,6 +393,7 @@ def coach_message(history, user_message, mode="模拟 AI", conversation_state=No
             draft.update({
                 "output_mode": "final_proposal",
                 "agreement_stage": "final_proposal",
+                "reply": "根据我们已经讨论的方向，我已整理好正式学习方案和第一项邮件任务。请检查学习目标、阶段安排和评价方式；如确认开始，请明确回复“确认开始训练”。",
                 "ready": True,
                 "remediation_policy": {
                     "principle": "根据作业证据识别具体差距，先提供针对性补强；重大路径调整须经学员确认。"
