@@ -542,9 +542,10 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
                 + "\\n\\nSYSTEM CHECK: The learner has already supplied enough context for a provisional "
                 "learning direction. Your previous response did not satisfy this requirement. "
                 "Return output_mode=initial_draft NOW, with a learner-facing Chinese reply, a "
-                "non-empty staged learning_path, AND a provisional assessment_plan with weighted criteria "
-                "and four performance levels. Missing weekly hours may be stated as an adjustable "
-                "assumption; do not ask another discovery question first. Do not return conversation mode."
+                "non-empty staged learning_path, AND a provisional assessment_plan with criteria "
+                "whose positive integer weights total 100 and a pass_threshold. "
+                "Four-level performance bands are optional. Missing weekly hours may be stated as an "
+                "adjustable assumption; do not ask another discovery question first. Do not return conversation mode."
             )
             data = _unwrap_nested_coach_payload(_call_ai_json(
                 system_prompt + "\\n\\nMANDATORY REPAIR: For this request, output_mode MUST be initial_draft. "
@@ -616,8 +617,45 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
             "AI 服务本轮暂时不可用。为避免让沟通卡住，我先提供一份明确标记为临时讨论稿的基础方案；"
             "恢复连接后可以再结合你的领域细化。\n\n" + data["reply"]
         )
+    # Providers occasionally return the learner-facing text under a different key,
+    # or omit it while still returning a syntactically valid JSON object. Never let
+    # that provider-format issue crash the learner conversation.
     if not isinstance(data.get("reply"), str) or not data["reply"].strip():
-        raise ValueError("AI 返回结果缺少有效的 reply，已阻止显示通用重复回复。")
+        for alias in ("response", "message", "answer", "content"):
+            candidate = data.get(alias)
+            if isinstance(candidate, str) and candidate.strip():
+                data["reply"] = candidate.strip()
+                break
+    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
+        if force_initial_draft:
+            data = _build_safe_initial_draft(
+                history, user_message, conversation_state, partial=data
+            )
+            data["reply"] = (
+                "我先根据你已经提供的信息整理一份可讨论的初版方案。"
+                "其中尚未确认的部分会标为假设，之后可以调整。\\n\\n"
+                + data["reply"]
+            )
+        else:
+            # The first goal statement is enough to acknowledge the direction,
+            # but not enough to infer the learner's starting level. Ask one
+            # plain-language question instead of raising an exception.
+            state = conversation_state if isinstance(conversation_state, dict) else {}
+            goal_text = str(user_message or "").strip()
+            data.update({
+                "output_mode": "conversation",
+                "agreement_stage": state.get("phase", "goal_discovery"),
+                "reply": (
+                    f"明白，你希望通过学习计算机基础知识来培养工程师思维。"
+                    "我会把学习重点放在理解原理、拆解问题和动手实践上。\\n\\n"
+                    "为了从合适的起点安排内容，我先确认一件事："
+                    "你目前更接近哪种情况——完全没有接触过编程，"
+                    "还是看过教程、跟着写过一些代码？"
+                ),
+                "ready": False,
+                "tasks": [],
+                "conversation_state": state,
+            })
     data.setdefault("ready", False)
     data.setdefault("agreement_stage", "goal_discovery")
     data.setdefault("stage_progress", {"current_stage": data["agreement_stage"], "what_is_agreed": [], "still_to_discuss": [], "next_step": ""})
