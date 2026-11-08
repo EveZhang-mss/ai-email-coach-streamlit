@@ -646,11 +646,11 @@ Do not force identical criteria onto unrelated subjects. Make every criterion re
                 "output_mode": "conversation",
                 "agreement_stage": state.get("phase", "goal_discovery"),
                 "reply": (
-                    f"明白，你希望通过学习计算机基础知识来培养工程师思维。"
-                    "我会把学习重点放在理解原理、拆解问题和动手实践上。\\n\\n"
+                    f"明白，你希望围绕「{goal_text}」开展学习。"
+                    "我会根据你的目标安排循序渐进、重视理解和实践的学习过程。\\n\\n"
                     "为了从合适的起点安排内容，我先确认一件事："
-                    "你目前更接近哪种情况——完全没有接触过编程，"
-                    "还是看过教程、跟着写过一些代码？"
+                    "你目前更接近哪种情况——完全没有接触过这个领域，"
+                    "还是看过教程、做过一些相关练习？"
                 ),
                 "ready": False,
                 "tasks": [],
