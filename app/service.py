@@ -421,6 +421,50 @@ def send_student_message(tid, message, mode):
         )
         previous_phase = conversation_state.get("phase", "goal_discovery")
         previous_round = int(conversation_state.get("phase_round", 0) or 0)
+        saved_draft = conversation_state.get("current_draft")
+        has_saved_draft = (
+            isinstance(saved_draft, dict)
+            and isinstance(saved_draft.get("learning_path"), list)
+            and bool(saved_draft.get("learning_path"))
+        )
+        # A brief affirmative answers the immediately preceding coach proposal.
+        # It is not a new goal/level answer and must never restart discovery.
+        affirmative = command.lower().strip("。！!，, ") in {
+            "可以", "可以的", "好的", "好", "没问题", "同意", "行", "就这样", "按这个来"
+        }
+        if has_saved_draft and affirmative:
+            agreed = list(conversation_state.get("agreed_points") or [])
+            previous_assistant = next(
+                (item.get("content", "") for item in reversed(history)
+                 if item.get("role") == "assistant"),
+                "",
+            )
+            if "邮件" in previous_assistant or "代码" in previous_assistant:
+                accepted_point = "邮件作业采用可运行代码（或附件）+ 3–5 句说明的默认形式"
+            else:
+                accepted_point = "学员认可教练上一轮提出的默认安排"
+            if accepted_point not in agreed:
+                agreed.append(accepted_point)
+            conversation_state["agreed_points"] = agreed
+            reply_text = (
+                "好，那我们就按刚才建议的默认邮件作业形式执行：每次提交一段可运行的代码（也可以作为附件），"
+                "再用 3–5 句话说明这次做了什么、卡在哪里以及如何解决。你不需要额外回答一组小测题。\n\n"
+                "接下来我们把评价方式也定下来。我建议以阶段小项目和你对解决思路的解释为主要依据，"
+                "少量概念检查作为辅助；这样既能检验理解，也不会变成单纯刷题。你觉得这个评价方式合适吗？"
+            )
+            reply.update({
+                "output_mode": "conversation",
+                "agreement_stage": "detail_negotiation",
+                "ready": False,
+                "tasks": [],
+            })
+            reply["conversation_state"] = {
+                **conversation_state,
+                "phase": "detail_negotiation",
+                "last_discussed_topic": "邮件作业形式",
+                "next_step": "确认阶段评价方式",
+                "pending_questions": ["是否接受以阶段小项目和思路解释为主的评价方式"],
+            }
         returned_state = reply.get("conversation_state")
         if isinstance(returned_state, dict):
             for key, value in returned_state.items():
@@ -430,9 +474,20 @@ def send_student_message(tid, message, mode):
                     conversation_state[key] = merged_profile
                 elif key in {"agreed_points", "pending_questions"} and isinstance(value, list):
                     conversation_state[key] = value
+                elif key == "current_draft" and has_saved_draft:
+                    # A model's empty/partial state must not erase a persisted draft.
+                    if isinstance(value, dict) and value.get("learning_path"):
+                        conversation_state[key] = {**saved_draft, **value}
+                elif key == "phase" and has_saved_draft:
+                    # Once a draft exists, only explicit proposal/final/active transitions
+                    # may move the workflow; a model cannot silently restart discovery.
+                    if value in {"initial_draft", "detail_negotiation", "final_proposal", "active_learning"}:
+                        conversation_state[key] = value
                 elif value is not None:
                     conversation_state[key] = value
         next_phase = reply.get("agreement_stage") or conversation_state.get("phase") or previous_phase
+        if has_saved_draft and next_phase == "goal_discovery":
+            next_phase = "detail_negotiation"
         conversation_state["phase"] = next_phase
         conversation_state["phase_round"] = (
             previous_round + 1 if next_phase == previous_phase else 1
