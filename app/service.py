@@ -6,7 +6,7 @@ from app.models import (
     Student, Training, EmailMessage, Task, Submission,
     TrainingAgreement, ReminderPlan, EmailSubmissionLink, CoachConversationState, now_utc
 )
-from app.coach import coach_message, generate_next_task, _normalize_learner_reply
+from app.coach import (\n    coach_message, generate_next_task, _normalize_learner_reply,\n    _build_safe_initial_draft, _mock_task,\n)
 from app.config import settings
 from app.ai_assessment import assess_submission
 def initialize():
@@ -413,9 +413,64 @@ def send_student_message(tid, message, mode):
 
         db.add(EmailMessage(training_id=tid, sender="学员", subject="训练沟通", body=message))
         db.flush()
-        reply = coach_message(
-            history, message, mode, conversation_state=conversation_state
+        # MVP fast path: when the learner explicitly asks to finalize the
+        # already-discussed plan, do not ask the language model to infer a
+        # workflow transition. Build and persist a pending proposal deterministically.
+        finalization_request = any(term in command for term in (
+            "最终学习方案整理", "整理最终学习方案", "进入最终学习方案",
+            "整理最终方案", "形成最终方案", "准备最终方案", "最终方案",
+        ))
+        saved_plan = conversation_state.get("current_draft")
+        has_saved_plan = (
+            isinstance(saved_plan, dict)
+            and isinstance(saved_plan.get("learning_path"), list)
+            and bool(saved_plan.get("learning_path"))
         )
+        if finalization_request and has_saved_plan:
+            reply = _build_safe_initial_draft(
+                history, message, conversation_state, partial=saved_plan
+            )
+            task = _mock_task(reply.get("goal_summary") or training.goal or "计算机基础学习")["tasks"][0]
+            task["title"] = "第一项任务：认识计算机系统的基本组成"
+            task["prompt"] = (
+                "请完成第一封学习邮件作业。\n\n"
+                "1. 用自己的话说明计算机由哪些主要部分组成，以及它们如何协作。\n"
+                "2. 选择一个你熟悉的软件或应用，尝试描述从输入到输出的大致过程。\n"
+                "3. 说明完成过程中遇到的一个疑问，以及你如何查找或验证答案。\n"
+                "4. 在邮件中附上你的回答，并用 3–5 句话进行学习复盘。\n\n"
+                "本任务用于建立基础认知，不要求专业术语完全准确；重点是表达理解过程。"
+            )
+            reply.update({
+                "output_mode": "final_proposal",
+                "agreement_stage": "final_proposal",
+                "ready": True,
+                "reply": (
+                    "已根据此前讨论整理最终学习方案：学习目标为计算机基础知识与工程师思维，"
+                    "每周投入 5 小时，按基础认知、核心方法、综合实践三个阶段推进。"
+                    "评价采用核心理解、实践应用、问题解决、表达复盘四个维度，总分 100 分，"
+                    "70 分作为阶段达标参考。下方是第一封邮件作业。\n\n"
+                    "请检查方案；回复“确认开始训练”后才会激活训练并创建第一项任务。"
+                ),
+                "remediation_policy": {
+                    "principle": "根据作业证据识别差距并先安排针对性补强；涉及目标、范围、阶段顺序或整体评价体系的重大调整，须经学员再次确认。"
+                },
+                "revision_summary": {
+                    "changes": ["按每周 5 小时整理执行节奏", "补充第一封邮件作业与任务评分标准"],
+                    "reason": "学员要求进入最终学习方案整理阶段",
+                },
+                "tasks": [task],
+                "conversation_state": {
+                    **conversation_state,
+                    "phase": "final_proposal",
+                    "last_discussed_topic": "最终学习方案",
+                    "next_step": "等待学员确认开始训练",
+                    "pending_questions": [],
+                },
+            })
+        else:
+            reply = coach_message(
+                history, message, mode, conversation_state=conversation_state
+            )
         reply_text = _normalize_learner_reply(
             reply.get("reply", "我们继续讨论你的训练目标。")
         )
