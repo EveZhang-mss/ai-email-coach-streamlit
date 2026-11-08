@@ -93,7 +93,7 @@ def test_coach_prompt_uses_natural_non_repetitive_conversation(monkeypatch):
     assert "MUST produce output_mode=\"initial_draft\" in THIS turn" in prompt
     assert "followed tutorials and typed code" in prompt
     assert "provisional overall assessment framework" in prompt
-    assert "four observable performance_levels" in prompt
+    assert "four-level performance bands are optional" in prompt
     assert "No fixed word count" in prompt
     assert "10-minute challenge" in prompt
     assert "150–300 Chinese characters" not in prompt
@@ -181,6 +181,35 @@ def test_nested_json_inside_reply_is_unwrapped_before_display():
     assert result["reply"] == "这是正常显示的中文学习方案。"
     assert result["learning_path"][0]["title"] == "基础阶段"
 
+
+
+def test_explicit_plan_request_uses_safe_draft_when_ai_returns_unparseable_json(monkeypatch):
+    def fail_with_nested_json(*args, **kwargs):
+        raise coach.AIResponseFormatError(
+            "AI 返回内容不是可识别的 JSON 对象。",
+            '{"output_mode":"initial_draft","reply":"\\u4e71\\u7801"}',
+        )
+
+    monkeypatch.setattr(coach, "_call_ai_json", fail_with_nested_json)
+    result = coach.coach_message(
+        [{"role": "user", "content": "我想学习计算机基础，培养工程师思维。"}],
+        "需要学习方案",
+        "真实 AI",
+        conversation_state={
+            "phase": "detail_negotiation",
+            "learner_profile": {"level": "beginner"},
+            "current_draft": {},
+        },
+    )
+
+    assert result["output_mode"] == "initial_draft"
+    assert result["ready"] is False
+    assert result["learning_path"]
+    assert result["assessment_plan"]["criteria"]
+    assert result["tasks"] == []
+    assert "初版方案" in result["reply"]
+    assert not result["reply"].lstrip().startswith("{")
+    assert result["conversation_state"]["phase"] == "initial_draft"
 
 
 def test_explicit_plan_request_uses_safe_draft_if_ai_schema_fails(monkeypatch):
