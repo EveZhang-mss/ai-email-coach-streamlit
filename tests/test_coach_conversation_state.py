@@ -166,6 +166,34 @@ def test_sufficient_goal_and_experience_force_initial_draft_retry(monkeypatch):
     assert result["ready"] is False
 
 
+
+def test_nested_json_inside_reply_is_unwrapped_before_display():
+    nested = {
+        "output_mode": "initial_draft",
+        "agreement_stage": "initial_draft",
+        "reply": "这是正常显示的中文学习方案。",
+        "learning_path": [{"stage": 1, "title": "基础阶段"}],
+        "assessment_plan": {"criteria": []},
+    }
+    outer = {"reply": json.dumps(nested, ensure_ascii=False)}
+    result = coach._unwrap_nested_coach_payload(outer)
+    assert result["output_mode"] == "initial_draft"
+    assert result["reply"] == "这是正常显示的中文学习方案。"
+    assert result["learning_path"][0]["title"] == "基础阶段"
+
+
+def test_explicit_need_learning_plan_forces_initial_draft():
+    assert coach._should_force_initial_draft(
+        [{"role": "user", "content": "我想学习计算机基础。"}],
+        "需要学习方案",
+        {"phase": "detail_negotiation", "current_draft": {}},
+    )
+    assert not coach._should_force_initial_draft(
+        [],
+        "需要学习方案",
+        {"phase": "active_learning"},
+    )
+
 def test_initial_draft_trigger_recognizes_beginner_experience():
     assert coach._should_force_initial_draft(
         [{"role": "user", "content": "我想学习计算机相关的基础知识。"}],
