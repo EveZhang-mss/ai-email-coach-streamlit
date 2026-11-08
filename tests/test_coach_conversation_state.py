@@ -372,8 +372,8 @@ def test_valid_json_without_reply_does_not_crash_first_goal_message(monkeypatch)
     assert result["ready"] is False
     assert result["tasks"] == []
     assert result["reply"]
-    assert "完全没有接触过编程" in result["reply"]
-    assert "跟着写过一些代码" in result["reply"]
+    assert "完全没有接触过这个领域" in result["reply"]
+    assert "做过一些相关练习" in result["reply"]
 
 
 def test_explicit_plan_with_missing_reply_uses_safe_draft(monkeypatch):
