@@ -379,8 +379,54 @@ def _has_provisional_assessment(plan):
 def coach_message(history, user_message, mode="模拟 AI", conversation_state=None):
     """跨领域个人成长教练；ready 只表示可提出协议，不代表启动训练。"""
     if mode != "真实 AI":
+        state = conversation_state if isinstance(conversation_state, dict) else {}
+        latest = str(user_message or "").strip()
+        final_request = any(term in latest for term in (
+            "整理最终方案", "形成最终方案", "最终方案", "准备最终方案"
+        ))
+        current_draft = state.get("current_draft")
+        if final_request and isinstance(current_draft, dict) and current_draft.get("learning_path"):
+            draft = _build_safe_initial_draft(
+                history, user_message, state, partial=current_draft
+            )
+            mock_task = _mock_task(draft.get("goal_summary", user_message))["tasks"][0]
+            draft.update({
+                "output_mode": "final_proposal",
+                "agreement_stage": "final_proposal",
+                "ready": True,
+                "remediation_policy": {
+                    "principle": "根据作业证据识别具体差距，先提供针对性补强；重大路径调整须经学员确认。"
+                },
+                "revision_summary": {
+                    "changes": ["将讨论稿整理为可执行的正式方案"],
+                    "reason": "学员要求形成最终方案",
+                },
+                "tasks": [mock_task],
+            })
+            draft["conversation_state"]["phase"] = "final_proposal"
+            return draft
+        if _should_force_initial_draft(history, latest, state):
+            return _build_safe_initial_draft(history, latest, state)
         user_turns = sum(1 for message in history if message.get("role") == "user")
-        return _mock_plan(user_message) if user_turns == 0 else _mock_task(user_message)
+        if user_turns == 0:
+            result = _mock_plan(latest)
+            result.update({
+                "output_mode": "conversation",
+                "agreement_stage": "goal_discovery",
+                "conversation_state": {
+                    **state, "phase": "goal_discovery", "phase_round": 1,
+                    "learner_profile": state.get("learner_profile", {}),
+                },
+            })
+            return result
+        return {
+            "output_mode": "conversation",
+            "agreement_stage": state.get("phase", "goal_discovery"),
+            "reply": "我会根据你刚才补充的信息继续完善建议。你也可以直接说“需要学习方案”，让我先整理一份讨论稿；讨论满意后再说“整理最终方案”。",
+            "ready": False,
+            "tasks": [],
+            "conversation_state": state,
+        }
 
     system_prompt = """
 You are an expert, practical, learner-centred AI Personal Growth Coach.
