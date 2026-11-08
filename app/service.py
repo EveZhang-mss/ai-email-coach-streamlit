@@ -363,12 +363,18 @@ def send_student_message(tid, message, mode):
             history, message, mode, conversation_state=conversation_state
         )
         reply_text = reply.get("reply", "我们继续讨论你的训练目标。")
+        previous_phase = conversation_state.get("phase", "goal_discovery")
+        previous_round = int(conversation_state.get("phase_round", 0) or 0)
         returned_state = reply.get("conversation_state")
         if isinstance(returned_state, dict):
             conversation_state.update(returned_state)
-        conversation_state["phase_round"] = int(conversation_state.get("phase_round", 0) or 0) + 1
-        if reply.get("agreement_stage"):
-            conversation_state["phase"] = reply["agreement_stage"]
+        next_phase = reply.get("agreement_stage") or conversation_state.get("phase") or previous_phase
+        conversation_state["phase"] = next_phase
+        conversation_state["phase_round"] = (
+            previous_round + 1 if next_phase == previous_phase else 1
+        )
+        if training.status == "active":
+            conversation_state["phase"] = "active_learning"
         if reply.get("output_mode") == "initial_draft":
             conversation_state["current_draft"] = {
                 "goal_summary": reply.get("goal_summary", training.goal),
