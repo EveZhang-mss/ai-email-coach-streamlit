@@ -491,3 +491,74 @@ def test_existing_draft_prompt_forbids_restarting_discovery(monkeypatch):
     assert "其他的都合适" in captured["system"]
     assert "weekly_hours" in captured["user"]
     assert "每周有五个小时" in captured["user"]
+
+
+def test_affirmative_after_draft_continues_negotiation_without_restarting_discovery(isolated_db, monkeypatch):
+    def fake_coach(history, message, mode, conversation_state=None):
+        # Simulate the exact regression: the model forgets the draft and asks
+        # the learner to repeat their programming background.
+        return {
+            "output_mode": "conversation",
+            "agreement_stage": "goal_discovery",
+            "reply": "为了安排内容，你目前是完全没有接触过，还是做过一些练习？",
+            "ready": False,
+            "tasks": [],
+            "conversation_state": {
+                "phase": "goal_discovery",
+                "learner_profile": {},
+                "current_draft": {},
+            },
+        }
+
+    monkeypatch.setattr(service, "coach_message", fake_coach)
+    with get_session() as db:
+        student = Student(name="Negotiation learner", email="negotiation-guard@example.com")
+        db.add(student)
+        db.flush()
+        training = Training(student_id=student.id, goal="", status="planning")
+        db.add(training)
+        db.flush()
+        db.add(EmailMessage(
+            training_id=training.id, sender="AI 教练", subject="训练回复",
+            body="我的建议是：每封邮件提交一段可运行的代码，再附 3–5 句说明。这样行吗？",
+        ))
+        draft = {
+            "goal_summary": "学习计算机基础知识，培养工程师思维",
+            "learning_path": [{"stage": 1, "title": "计算机基础"}],
+            "assessment_plan": {"criteria": [{"name": "理解", "description": "理解概念", "points": 100}], "pass_threshold": 70},
+            "assumptions": ["每周投入 4 小时"],
+        }
+        db.add(CoachConversationState(
+            training_id=training.id,
+            state_json=json.dumps({
+                "phase": "detail_negotiation",
+                "phase_round": 2,
+                "learner_profile": {
+                    "goal": "学习计算机基础知识，培养工程师思维",
+                    "level": "写过简单代码，有少量编程经验的初学者",
+                    "weekly_hours": 4,
+                },
+                "agreed_points": [],
+                "pending_questions": [],
+                "current_draft": draft,
+            }, ensure_ascii=False),
+        ))
+        db.commit()
+        training_id = training.id
+
+    response = service.send_student_message(training_id, "可以的", "真实 AI")
+
+    assert "3–5 句话说明" in response
+    assert "评价方式" in response
+    assert "完全没有接触过" not in response
+    with get_session() as db:
+        saved_row = db.scalar(
+            select(CoachConversationState).where(
+                CoachConversationState.training_id == training_id
+            )
+        )
+        saved = json.loads(saved_row.state_json)
+        assert saved["phase"] == "detail_negotiation"
+        assert saved["learner_profile"]["level"] == "写过简单代码，有少量编程经验的初学者"
+        assert saved["current_draft"]["learning_path"][0]["title"] == "计算机基础"
+        assert any("邮件作业" in item for item in saved["agreed_points"])
