@@ -426,6 +426,8 @@ learner's explicit "确认开始训练" before creating the formal task and acti
     data["conversation_state"].setdefault("next_step", "")
 
     if data["ready"]:
+        if data.get("output_mode") != "final_proposal":
+            raise ValueError("只有 final_proposal 输出模式可以提交正式训练提议。")
         if data.get("agreement_stage") != "final_proposal":
             raise ValueError("只有最终方案阶段可以提交正式训练提议。")
         learning_path = data.get("learning_path")
